@@ -73,6 +73,11 @@ private:
     };
     Outputs outputs;
 
+    // Last value of ALERT actually transmitted to SC. Used to edge-trigger sends:
+    // ALERT is forwarded only on transitions (0 -> 1 or 1 -> 0), not every tick.
+    // Sentinel -1 forces the very first send so SC starts with a known state.
+    int lastAlertSent = -1;
+
     std::atomic<bool> manualMode { false };
     std::atomic<bool> sendToSC   { true  };
 

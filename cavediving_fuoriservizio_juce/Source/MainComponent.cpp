@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include <algorithm>   // std::clamp, std::min
 
 //======================= INITIALIZATION & TEARDOWN =======================================================
 MainComponent::MainComponent()
@@ -103,7 +104,7 @@ void MainComponent::paint (juce::Graphics& g)
 
     g.setColour (juce::Colours::white);
     g.setFont (16.0f);
-    g.drawText ("M4 - dev sliders + Manual/OSC + Send-to-SC toggle",
+    g.drawText ("Cave Diving Controller - OSC in 9001 / out 57120",
                 10, 10, getWidth() - 20, 24, juce::Justification::centredLeft);
 
     g.setFont (14.0f);
@@ -206,13 +207,44 @@ void MainComponent::timerCallback()
 
 void MainComponent::applyMappingAndSend()
 {
-    // Identity mapping for M4. Real curves (PAN/BPM from L+R, ALERT edge-triggered,
-    // PITCH in Hz, etc.) land in M5.
-    outputs.reverb = inputs.front.load();
-    outputs.pan    = inputs.left.load();
-    outputs.bpm    = inputs.right.load();
-    outputs.pitch  = inputs.accel.load();
-    outputs.alert  = inputs.vario.load();
+    // Take a consistent snapshot of the atomic inputs.
+    const float f = inputs.front.load();
+    const float l = inputs.left .load();
+    const float r = inputs.right.load();
+    const float a = inputs.accel.load();
+    const int   v = inputs.vario.load();
+
+    // ASSUMPTION: sonar normalisation is "0 = wall attached, 1 = max distance"
+    // (proximity-from-near). If the ESP32 firmware uses the opposite convention,
+    // REVERB and PAN/BPM signs must be flipped. To be confirmed on first board
+    // test (M9).
+
+    // REVERB = FRONTAL, linear in [0, 1].
+    outputs.reverb = std::clamp (f, 0.0f, 1.0f);
+
+    // PAN = L - R, clamped to [-1, +1]. Goes toward the closer side wall: the
+    // user "hears" the wall they are drifting into and instinctively recentres.
+    outputs.pan = std::clamp (l - r, -1.0f, 1.0f);
+
+    // BPM accelerates as the channel narrows (one wall close is enough).
+    // Range [40, 200] BPM. "Narrowness" defined as min(L, R) for stronger
+    // emergency feel; alternative (L+R)/2 left for later if needed.
+    const float narrowness = std::min (l, r);
+    outputs.bpm = std::clamp (40.0f + (1.0f - narrowness) * 160.0f, 40.0f, 200.0f);
+
+    // PITCH = lerp(80, 800, ACCEL) in Hz. ASSUMPTION: accelerometer is already
+    // normalised on the board with neutral at 0.5 (head horizontal). Range and
+    // curve are placeholders, to be tuned with SC team.
+    const float aClamped = std::clamp (a, 0.0f, 1.0f);
+    outputs.pitch = 80.0f + aClamped * (800.0f - 80.0f);
+
+    // ALERT = (VARIO > threshold) ? 1 : 0. Edge-triggered in sendOutputs().
+    // ASSUMPTION: VARIO unit is unconfirmed (canonical doc says "m/s int" but
+    // that's suspicious — realistic safe ascent ~0.17 m/s would never trip an
+    // integer threshold). The threshold 3 is placeholder: with fake_esp32's
+    // [-5, +5] sweep it produces visible transitions every ~13 s.
+    constexpr int ALERT_THRESHOLD = 3;
+    outputs.alert = (v > ALERT_THRESHOLD) ? 1 : 0;
 
     sendOutputs();
 }
@@ -222,11 +254,20 @@ void MainComponent::sendOutputs()
     if (! sendToSC.load())
         return;
 
+    // Continuous control parameters: forwarded every tick (~18 Hz on Windows).
     forwardFloat ("/out/reverb", outputs.reverb);
     forwardFloat ("/out/pan",    outputs.pan);
     forwardFloat ("/out/bpm",    outputs.bpm);
     forwardFloat ("/out/pitch",  outputs.pitch);
-    forwardInt   ("/out/alert",  outputs.alert);
+
+    // ALERT is semantically an event, not a continuous parameter. Forward only
+    // on transitions to avoid flooding SC with redundant 0s. The -1 sentinel in
+    // lastAlertSent forces the first send so SC sees the initial state.
+    if (outputs.alert != lastAlertSent)
+    {
+        forwardInt ("/out/alert", outputs.alert);
+        lastAlertSent = outputs.alert;
+    }
 }
 
 void MainComponent::forwardFloat (const char* addr, float v)
