@@ -1,8 +1,16 @@
 """
-Fake ESP32 — sends the 5 sensor streams to JUCE at 127.0.0.1:9001 over OSC.
+Fake Arduino MKR — sends the 5 sensor streams to JUCE at 127.0.0.1:9000 over OSC.
 
-Sweep mode (default): 4 floats vary sinusoidally in [0, 1] with independent
-periods; 1 int variometer cycles in [-5, +5] with a slower period.
+Matches the actual Arduino code on branch `arduino` (CMLS_arduino.ino):
+  /sensor/space/pan        float [-1, +1]   (= gravity1 - gravity2, low-pass filtered)
+  /sensor/space/width      float [0, 1]     (= (gravity1 + gravity2) / 2, low-pass filtered)
+  /sensor/space/depth      float [0, 1]     (HCSR04, 0 = wall close, 1 = far)
+  /sensor/position/tilt    float [0, 1]     (MMA accel X normalised, neutral ~0.5)
+  /sensor/position/speed   float            (joystick discrete, real Arduino sends {0, 2.5, 5, 7.5, 10})
+
+Sweep mode (default): independent sinusoids with different periods so the
+streams look visually distinct in JUCE. Speed sweeps continuously in [0, 10]
+(not the discrete joystick values) — easier to test the alarm threshold.
 
 Run from Windows:  python tools\\fake_esp32.py
 Stop:              Ctrl+C
@@ -15,14 +23,14 @@ import time
 import math
 
 TARGET_IP   = "127.0.0.1"
-TARGET_PORT = 9001
-RATE_HZ     = 30          # update rate per stream
-MAX_RUN_S   = 600         # safety cap on run length
+TARGET_PORT = 9000        # was 9001 pre-M5b; aligned to Arduino's remotePort
+RATE_HZ     = 10          # match Arduino's SEND_INTERVAL_MS = 100
+MAX_RUN_S   = 600
 
 
 def main():
     client = SimpleUDPClient(TARGET_IP, TARGET_PORT)
-    print(f"Fake ESP32 -> {TARGET_IP}:{TARGET_PORT}  ({RATE_HZ} Hz, Ctrl+C to stop)")
+    print(f"Fake Arduino -> {TARGET_IP}:{TARGET_PORT}  ({RATE_HZ} Hz, Ctrl+C to stop)")
 
     t0 = time.monotonic()
     period = 1.0 / RATE_HZ
@@ -34,20 +42,27 @@ def main():
                 print("Max run length reached.")
                 break
 
-            # 4 floats in [0, 1], each with a different period -> visually independent
-            front = 0.5 + 0.5 * math.sin(2 * math.pi * t /  3.0)
-            left  = 0.5 + 0.5 * math.sin(2 * math.pi * t /  5.0)
-            right = 0.5 + 0.5 * math.sin(2 * math.pi * t /  7.0)
-            accel = 0.5 + 0.5 * math.sin(2 * math.pi * t / 11.0)
+            # pan in [-1, +1], period 5s
+            pan = math.sin(2 * math.pi * t / 5.0)
 
-            # variometer: int [-5, +5], slow period
-            vario = int(round(5 * math.sin(2 * math.pi * t / 13.0)))
+            # width in [0, 1], period 7s
+            width = 0.5 + 0.5 * math.sin(2 * math.pi * t / 7.0)
 
-            client.send_message("/in/sonar/front", front)
-            client.send_message("/in/sonar/left",  left)
-            client.send_message("/in/sonar/right", right)
-            client.send_message("/in/accel",       accel)
-            client.send_message("/in/vario",       vario)
+            # depth in [0, 1], period 3s (frontal sonar oscillation)
+            depth = 0.5 + 0.5 * math.sin(2 * math.pi * t / 3.0)
+
+            # tilt in [0, 1], period 11s (head tilt)
+            tilt = 0.5 + 0.5 * math.sin(2 * math.pi * t / 11.0)
+
+            # speed in [0, 10], period 13s — continuous sweep crosses the 3.0
+            # alarm threshold predictably, useful to verify edge-trigger behaviour.
+            speed = 5.0 + 5.0 * math.sin(2 * math.pi * t / 13.0)
+
+            client.send_message("/sensor/space/pan",      pan)
+            client.send_message("/sensor/space/width",    width)
+            client.send_message("/sensor/space/depth",    depth)
+            client.send_message("/sensor/position/tilt",  tilt)
+            client.send_message("/sensor/position/speed", speed)
 
             time.sleep(period)
     except KeyboardInterrupt:

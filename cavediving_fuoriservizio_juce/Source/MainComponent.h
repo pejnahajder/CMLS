@@ -5,18 +5,27 @@
 
 //==============================================================================
 /*
-    This component lives inside our window, and this is where you should put all
-    your controls and content.
+    Cave Diving Controller — JUCE engine.
 
-    M4 architecture:
-      OSC in  ───┐
-                 ├─►  std::atomic Inputs  ──►  Timer @30Hz  ──►  Outputs  ──►  OSC to SC
-      Slider ────┘                                            └────────►  repaint()
+    Data flow (M5b architecture):
 
-    Both OSC handler and slider callbacks write to atomic inputs. The Timer reads
-    them at 30 Hz, applies the mapping (identity for M4, real formulas in M5),
-    and sends to SC. This decouples input rate from output rate and gives a
-    single canonical place for the mapping logic.
+      Arduino MKR ─OSC/UDP:9000─►  std::atomic Inputs  ─►  Timer @30Hz  ─►  Outputs  ─►  OSC/UDP:57120 to SuperCollider
+                                          ▲
+      5 dev sliders (Manual mode) ────────┘
+
+    Input contract (from Arduino, branch `arduino`):
+      /sensor/space/pan        float [-1, +1]   (already cooked = gravity1 - gravity2)
+      /sensor/space/width      float [0, 1]     (already cooked = (gravity1 + gravity2) / 2)
+      /sensor/space/depth      float [0, 1]     (HCSR04, 0 = wall close, 1 = far)
+      /sensor/position/tilt    float [0, 1]     (MMA accel X normalised, neutral ~0.5)
+      /sensor/position/speed   float            (joystick, discrete {0, 2.5, 5, 7.5, 10})
+
+    Output contract (to SC, after our mapping):
+      /synth/reverb   float [0, 1]      (wet/dry)
+      /synth/pan      float [-1, +1]
+      /synth/bpm      float [40, 200]
+      /synth/freq     float Hz [80, 800]
+      /alarm/gate     int   {0, 1}      (edge-triggered, not rate-constant)
 */
 class MainComponent  : public juce::Component,
                        public juce::OSCReceiver::Listener<juce::OSCReceiver::MessageLoopCallback>,
@@ -48,41 +57,40 @@ private:
     void onManualToggleChanged();
     void updateSliderEnablement();
 
-    // Raw input state. Written by OSC handler (in OSC mode) or by slider callbacks
-    // (in Manual mode); read by the Timer. Atomic for future-proofing — today all
-    // accesses happen on the message thread thanks to MessageLoopCallback.
+    // Raw input state from Arduino (or from sliders in Manual mode).
+    // Atomic for future-proofing; today all accesses happen on the message thread
+    // thanks to MessageLoopCallback.
     struct Inputs
     {
-        std::atomic<float> front { 0.5f };
-        std::atomic<float> left  { 0.5f };
-        std::atomic<float> right { 0.5f };
-        std::atomic<float> accel { 0.5f };
-        std::atomic<int>   vario { 0 };
+        std::atomic<float> pan   { 0.0f };  // [-1, +1], already cooked by Arduino
+        std::atomic<float> width { 0.5f };  // [0, 1], already cooked by Arduino
+        std::atomic<float> depth { 0.5f };  // [0, 1], HCSR04 frontal
+        std::atomic<float> tilt  { 0.5f };  // [0, 1], MMA accel X (neutral 0.5)
+        std::atomic<float> speed { 0.0f };  // joystick discrete, {0, 2.5, 5, 7.5, 10}
     };
     Inputs inputs;
 
-    // Computed output state. Written only by the Timer, read by paint(). Both run
-    // on the message thread, no atomic needed.
+    // Cooked output sent to SC. Written by Timer, read by paint(). Both on
+    // message thread → no atomic needed.
     struct Outputs
     {
         float reverb = 0.0f;
         float pan    = 0.0f;
         float bpm    = 0.0f;
-        float pitch  = 0.0f;
-        int   alert  = 0;
+        float freq   = 0.0f;     // Hz, was "pitch" pre-refactor
+        int   alarm  = 0;
     };
     Outputs outputs;
 
-    // Last value of ALERT actually transmitted to SC. Used to edge-trigger sends:
-    // ALERT is forwarded only on transitions (0 -> 1 or 1 -> 0), not every tick.
-    // Sentinel -1 forces the very first send so SC starts with a known state.
-    int lastAlertSent = -1;
+    // Last alarm gate value forwarded to SC. Edge-trigger sentinel: -1 forces
+    // the very first send so SC starts with a known state.
+    int lastAlarmSent = -1;
 
     std::atomic<bool> manualMode { false };
     std::atomic<bool> sendToSC   { true  };
 
-    juce::Slider sliderFront, sliderLeft, sliderRight, sliderAccel, sliderVario;
-    juce::Label  lblFront,    lblLeft,    lblRight,    lblAccel,    lblVario;
+    juce::Slider sliderPan, sliderWidth, sliderDepth, sliderTilt, sliderSpeed;
+    juce::Label  lblPan,    lblWidth,    lblDepth,    lblTilt,    lblSpeed;
     juce::ToggleButton btnManual { "Manual mode" };
     juce::ToggleButton btnSendSC { "Send to SC" };
 
