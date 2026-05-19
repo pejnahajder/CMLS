@@ -64,6 +64,10 @@ float[] spectrum = new float[SPECTRUM_LEN];
 // back to synthetic.
 int lastScopeOscMs = -10_000;
 
+// Same for /viz/* (input + cooked output values from JUCE). If older than 1s,
+// the synthetic underlying sweep takes over so the UI never sits still.
+int lastVizOscMs   = -10_000;
+
 // -----------------------------------------------------------------------------
 // OSC + panel objects
 // -----------------------------------------------------------------------------
@@ -112,21 +116,24 @@ void draw() {
 void updateSynthetic() {
   float t = millis() / 1000.0;
 
-  // Only overwrite the "in" values if no recent JUCE viz was received in 1s.
-  // For now we don't yet track that, so unconditionally drive a slow sweep.
-  pan_in   = sin(TWO_PI * t / 5.0);
-  width_in = 0.5 + 0.5 * sin(TWO_PI * t / 7.0);
-  depth_in = 0.5 + 0.5 * sin(TWO_PI * t / 3.0);
-  tilt_in  = 0.5 + 0.5 * sin(TWO_PI * t / 11.0);
-  speed_in = 5.0 + 5.0 * sin(TWO_PI * t / 13.0);
+  // Only drive the synthetic sweep if no recent /viz/* has been received.
+  // When JUCE is alive on the wire, oscEvent() already set the up-to-date
+  // values; running the synthetic here would overwrite them every frame.
+  if (millis() - lastVizOscMs > 1000) {
+    pan_in   = sin(TWO_PI * t / 5.0);
+    width_in = 0.5 + 0.5 * sin(TWO_PI * t / 7.0);
+    depth_in = 0.5 + 0.5 * sin(TWO_PI * t / 3.0);
+    tilt_in  = 0.5 + 0.5 * sin(TWO_PI * t / 11.0);
+    speed_in = 5.0 + 5.0 * sin(TWO_PI * t / 13.0);
 
-  // Apply the same mapping locally (mirror of JUCE's applyMappingAndSend).
-  // When JUCE actually sends /viz/out/*, this is overridden.
-  reverb_out = constrain(depth_in, 0, 1);
-  pan_out    = constrain(pan_in, -1, +1);
-  bpm_out    = constrain(40 + (1 - width_in) * 160, 40, 200);
-  freq_out   = 80 + constrain(tilt_in, 0, 1) * (800 - 80);
-  alarm_out  = (speed_in > 3.0) ? 1 : 0;
+    // Synthetic outputs mirror JUCE's applyMappingAndSend so the demo looks
+    // realistic without a JUCE engine running.
+    reverb_out = constrain(depth_in, 0, 1);
+    pan_out    = constrain(pan_in, -1, +1);
+    bpm_out    = constrain(40 + (1 - width_in) * 160, 40, 200);
+    freq_out   = 80 + constrain(tilt_in, 0, 1) * (800 - 80);
+    alarm_out  = (speed_in > 3.0) ? 1 : 0;
+  }
 
   // Scope: if no recent /scope/amp, synthesise sin(2pi * freq * t).
   if (millis() - lastScopeOscMs > 2000) {
@@ -152,6 +159,9 @@ void updateSynthetic() {
 // -----------------------------------------------------------------------------
 void oscEvent(OscMessage msg) {
   String addr = msg.addrPattern();
+
+  boolean isViz = addr.startsWith("/viz/");
+  if (isViz) lastVizOscMs = millis();
 
   if      (addr.equals("/viz/in/pan"))     pan_in   = msg.get(0).floatValue();
   else if (addr.equals("/viz/in/width"))   width_in = msg.get(0).floatValue();
