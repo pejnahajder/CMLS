@@ -7,7 +7,7 @@
 /*
     Cave Diving Controller — JUCE engine.
 
-    Data flow (M5b architecture):
+    Data flow:
 
       Arduino MKR ─OSC/UDP:9000─►  std::atomic Inputs  ─►  Timer @30Hz  ─►  Outputs  ─►  OSC/UDP:57120 to SuperCollider
                                           ▲

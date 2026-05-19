@@ -23,7 +23,7 @@ import time
 import math
 
 TARGET_IP   = "127.0.0.1"
-TARGET_PORT = 9000        # was 9001 pre-M5b; aligned to Arduino's remotePort
+TARGET_PORT = 9000        # aligned to Arduino's remotePort
 RATE_HZ     = 10          # match Arduino's SEND_INTERVAL_MS = 100
 MAX_RUN_S   = 600
 

@@ -210,7 +210,7 @@ void MainComponent::applyMappingAndSend()
     outputs.bpm = std::clamp (40.0f + (1.0f - widthIn) * 160.0f, 40.0f, 200.0f);
 
     // FREQ: lerp(80, 800, tilt) in Hz. ASSUMPTION: tilt neutral ~0.5 (head
-    // horizontal), to be verified at first board test (M9).
+    // horizontal), to be verified at first board test.
     const float tiltClamped = std::clamp (tiltIn, 0.0f, 1.0f);
     outputs.freq = 80.0f + tiltClamped * (800.0f - 80.0f);
 
