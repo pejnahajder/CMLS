@@ -17,6 +17,10 @@ MainComponent::MainComponent()
     if (! oscSender.connect ("127.0.0.1", 57120))
         juce::Logger::writeToLog ("Error: Could not connect OSC Sender to port 57120");
 
+    // Transmit to the Processing UI on 9003 (live monitoring of inputs + outputs).
+    if (! oscSenderViz.connect ("127.0.0.1", 9003))
+        juce::Logger::writeToLog ("Error: Could not connect viz OSC Sender to port 9003");
+
     // --- Sliders (5 floats, with three different ranges) ---
     auto setupSlider = [this] (juce::Slider& s, juce::Label& lbl, const juce::String& name,
                                std::atomic<float>& target,
@@ -64,6 +68,7 @@ MainComponent::~MainComponent()
     oscReceiver.removeListener (this);
     oscReceiver.disconnect();
     oscSender.disconnect();
+    oscSenderViz.disconnect();
 }
 
 void MainComponent::onManualToggleChanged()
@@ -182,6 +187,7 @@ void MainComponent::oscMessageReceived (const juce::OSCMessage& message)
 void MainComponent::timerCallback()
 {
     applyMappingAndSend();
+    sendVizSnapshot();
     repaint();
 }
 
@@ -255,4 +261,35 @@ void MainComponent::forwardInt (const char* addr, int v)
     juce::OSCMessage msg (addr);
     msg.addInt32 (v);
     oscSender.send (msg);
+}
+
+void MainComponent::sendVizSnapshot()
+{
+    // Live monitoring stream to the Processing UI. Not gated by sendToSC: the
+    // UI should keep moving even when the synth output is silenced.
+    sendVizFloat ("/viz/in/pan",    inputs.pan  .load());
+    sendVizFloat ("/viz/in/width",  inputs.width.load());
+    sendVizFloat ("/viz/in/depth",  inputs.depth.load());
+    sendVizFloat ("/viz/in/tilt",   inputs.tilt .load());
+    sendVizFloat ("/viz/in/speed",  inputs.speed.load());
+
+    sendVizFloat ("/viz/out/reverb", outputs.reverb);
+    sendVizFloat ("/viz/out/pan",    outputs.pan);
+    sendVizFloat ("/viz/out/bpm",    outputs.bpm);
+    sendVizFloat ("/viz/out/freq",   outputs.freq);
+    sendVizInt   ("/viz/out/alarm",  outputs.alarm);
+}
+
+void MainComponent::sendVizFloat (const char* addr, float v)
+{
+    juce::OSCMessage msg (addr);
+    msg.addFloat32 (v);
+    oscSenderViz.send (msg);
+}
+
+void MainComponent::sendVizInt (const char* addr, int v)
+{
+    juce::OSCMessage msg (addr);
+    msg.addInt32 (v);
+    oscSenderViz.send (msg);
 }

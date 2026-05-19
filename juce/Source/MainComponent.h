@@ -26,6 +26,10 @@
       /synth/bpm      float [40, 200]
       /synth/freq     float Hz [80, 800]
       /alarm/gate     int   {0, 1}      (edge-triggered, not rate-constant)
+
+    Viz contract (to Processing UI on 9003, rate-constant every Timer tick):
+      /viz/in/pan     /viz/in/width    /viz/in/depth   /viz/in/tilt   /viz/in/speed     (5 floats)
+      /viz/out/reverb /viz/out/pan     /viz/out/bpm    /viz/out/freq  /viz/out/alarm    (4 floats + 1 int)
 */
 class MainComponent  : public juce::Component,
                        public juce::OSCReceiver::Listener<juce::OSCReceiver::MessageLoopCallback>,
@@ -51,8 +55,11 @@ private:
 
     void applyMappingAndSend();
     void sendOutputs();
+    void sendVizSnapshot();
     void forwardFloat (const char* addr, float v);
     void forwardInt   (const char* addr, int v);
+    void sendVizFloat (const char* addr, float v);
+    void sendVizInt   (const char* addr, int v);
 
     void onManualToggleChanged();
     void updateSliderEnablement();
@@ -95,7 +102,8 @@ private:
     juce::ToggleButton btnSendSC { "Send to SC" };
 
     juce::OSCReceiver oscReceiver;
-    juce::OSCSender   oscSender;
+    juce::OSCSender   oscSender;     // -> SuperCollider on 57120 (cooked params)
+    juce::OSCSender   oscSenderViz;  // -> Processing on 9003 (live monitoring)
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };
