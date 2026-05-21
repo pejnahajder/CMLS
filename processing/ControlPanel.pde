@@ -1,6 +1,6 @@
 // Control Panel — left half of the window.
 // Placeholder layout, synthetic values driving the visuals.
-//   - 5 pre-dive config sliders (display-only here for now)
+//   - 5 pre-dive config sliders (now interactive)
 //   - 5 live sensor input bars
 //   - 5 live cooked output bars
 //   - Oscilloscope of the audio signal (synthetic until SC sends real data)
@@ -17,19 +17,33 @@ class ControlPanel {
   final int ROW_H     = 24;
   final int SECTION_GAP = 12;
 
-  // Placeholder config values (interactive once APPLY is wired)
+  // Config values (Interactive UI state)
   float cfgBpmMin    = 40;
   float cfgBpmMax    = 200;
   float cfgFreqMin   = 80;
   float cfgFreqMax   = 800;
   float cfgAlarmThr  = 3.0;
 
+  // Active config values (Committed on APPLY, used by the engine/bars)
+  float activeBpmMin    = 40;
+  float activeBpmMax    = 200;
+  float activeFreqMin   = 80;
+  float activeFreqMax   = 800;
+  float activeAlarmThr  = 3.0;
+
+  // --- MOUSE INTERACTION VARIABLES ---
+  int[] sliderY = new int[5];
+  int sliderX, sliderW;
+  int btnX, btnY, btnW, btnH;
+  int activeSlider = -1;
+  int lastApplyMs = -10000;
+
   ControlPanel(int x, int y, int w, int h) {
     this.x = x; this.y = y; this.w = w; this.h = h;
   }
 
   void draw() {
-    // panel header
+    // Panel header
     fill(C_GREEN);
     textSize(14);
     textAlign(LEFT, TOP);
@@ -57,32 +71,56 @@ class ControlPanel {
     text("PRE-DIVE CONFIG  (APPLY -> JUCE)", gx, gy);
     gy += 16;
 
-    gy = drawConfigRow(gx, gy, gw, "bpm.min",     cfgBpmMin,    20, 200);
-    gy = drawConfigRow(gx, gy, gw, "bpm.max",     cfgBpmMax,    20, 200);
-    gy = drawConfigRow(gx, gy, gw, "freq.min Hz", cfgFreqMin,   20, 2000);
-    gy = drawConfigRow(gx, gy, gw, "freq.max Hz", cfgFreqMax,   20, 2000);
-    gy = drawConfigRow(gx, gy, gw, "alarm.thr",   cfgAlarmThr,  0, 10);
+    // Save slider coordinates for mouse interaction
+    sliderX = gx + 90;
+    sliderW = gw - 90 - 70;
 
-    // APPLY button placeholder
-    int btnW = 80, btnH = 22;
-    noFill();
+    sliderY[0] = gy; gy = drawConfigRow(gx, gy, gw, "bpm.min",     cfgBpmMin,    20, 200);
+    sliderY[1] = gy; gy = drawConfigRow(gx, gy, gw, "bpm.max",     cfgBpmMax,    20, 200);
+    sliderY[2] = gy; gy = drawConfigRow(gx, gy, gw, "freq.min Hz", cfgFreqMin,   20, 2000);
+    sliderY[3] = gy; gy = drawConfigRow(gx, gy, gw, "freq.max Hz", cfgFreqMax,   20, 2000);
+    sliderY[4] = gy; gy = drawConfigRow(gx, gy, gw, "alarm.thr",   cfgAlarmThr,  0, 10);
+
+    // Save APPLY button coordinates
+    btnW = 80; btnH = 22;
+    btnX = gx + gw - btnW; 
+    btnY = gy;
+    
+    // Draw APPLY button with hover/click feedback
+    boolean isHover = isApplyClicked(mouseX, mouseY);
+    boolean isClick = isHover && mousePressed;
+    
+    if (isClick) fill(C_HIGHLIGHT);
+    else noFill();
+    
     stroke(C_GREEN);
-    rect(gx + gw - btnW, gy, btnW, btnH);
-    fill(C_GREEN);
+    rect(btnX, btnY, btnW, btnH);
+    
+    if (isClick) fill(C_BG);
+    else fill(C_GREEN);
+    
     textAlign(CENTER, CENTER);
     textSize(11);
-    text("APPLY", gx + gw - btnW / 2, gy + btnH / 2);
+    text("APPLY", btnX + btnW / 2, btnY + btnH / 2);
+    
+    // Visual feedback "SENT TO JUCE"
+    if (millis() - lastApplyMs < 1500) {
+      fill(C_HIGHLIGHT);
+      textAlign(RIGHT, CENTER);
+      text("SENT TO JUCE! -->", btnX - 10, btnY + btnH / 2);
+    }
+
     return gy + btnH;
   }
 
   int drawConfigRow(int gx, int gy, int gw, String label, float value, float vmin, float vmax) {
-    // label
+    // Label
     fill(C_TEXT);
     textSize(11);
     textAlign(LEFT, CENTER);
     text(label, gx, gy + ROW_H / 2);
 
-    // bar
+    // Bar track
     int barX = gx + 90;
     int barW = gw - 90 - 70;
     noFill();
@@ -93,12 +131,50 @@ class ControlPanel {
     fill(C_GREEN_DIM);
     rect(barX + 1, gy + 5, (barW - 2) * fillFrac, ROW_H - 10);
 
-    // value text
+    // Value text
     fill(C_TEXT);
     textAlign(RIGHT, CENTER);
     text(nf(value, 0, 1), gx + gw - 4, gy + ROW_H / 2);
 
     return gy + ROW_H;
+  }
+
+  // --- INTERACTION LOGIC ---
+  boolean isApplyClicked(int mx, int my) {
+    return (mx >= btnX && mx <= btnX + btnW && my >= btnY && my <= btnY + btnH);
+  }
+
+  void handleMousePressed(int mx, int my) {
+    for (int i = 0; i < 5; i++) {
+      if (my >= sliderY[i] && my <= sliderY[i] + ROW_H) {
+        if (mx >= sliderX && mx <= sliderX + sliderW) {
+          activeSlider = i;
+          updateSliderValue(mx);
+          return;
+        }
+      }
+    }
+  }
+
+  void handleMouseDragged(int mx, int my) {
+    if (activeSlider != -1) {
+      updateSliderValue(mx);
+    }
+  }
+
+  void handleMouseReleased() {
+    activeSlider = -1;
+  }
+
+  void updateSliderValue(int mx) {
+    float frac = constrain((float)(mx - sliderX) / sliderW, 0.0, 1.0);
+    switch(activeSlider) {
+      case 0: cfgBpmMin   = lerp(20, 200, frac);   break;
+      case 1: cfgBpmMax   = lerp(20, 200, frac);   break;
+      case 2: cfgFreqMin  = lerp(20, 2000, frac);  break;
+      case 3: cfgFreqMax  = lerp(20, 2000, frac);  break;
+      case 4: cfgAlarmThr = lerp(0, 10, frac);     break;
+    }
   }
 
   // -----------------------------------------------------------------
@@ -125,8 +201,10 @@ class ControlPanel {
     gy += 16;
     gy = drawValueBar(gx, gy, gw, "reverb", reverb_out, 0, 1, 3, C_HIGHLIGHT, false);
     gy = drawValueBar(gx, gy, gw, "pan",    pan_out,   -1, 1, 3, C_HIGHLIGHT, true);
-    gy = drawValueBar(gx, gy, gw, "bpm",    bpm_out,   40, 200, 1, C_HIGHLIGHT, false);
-    gy = drawValueBar(gx, gy, gw, "freq",   freq_out,  80, 800, 0, C_HIGHLIGHT, false);
+    
+    // Use active variables to define bar limits
+    gy = drawValueBar(gx, gy, gw, "bpm",    bpm_out,   activeBpmMin, activeBpmMax, 1, C_HIGHLIGHT, false);
+    gy = drawValueBar(gx, gy, gw, "freq",   freq_out,  activeFreqMin, activeFreqMax, 0, C_HIGHLIGHT, false);
     gy = drawAlarmRow(gx, gy, gw, "alarm",  alarm_out);
     return gy;
   }
@@ -146,7 +224,7 @@ class ControlPanel {
     noStroke();
     fill(barColor, 220);
     if (bipolar) {
-      // center anchor, bar grows left or right
+      // Center anchor, bar grows left or right
       float frac = constrain((value - vmin) / (vmax - vmin), 0, 1);  // 0..1
       float center = barX + barW * 0.5;
       float xLeft, xRight;
@@ -196,7 +274,7 @@ class ControlPanel {
     stroke(C_GREEN_DARK);
     rect(gx, gy, gw, gh);
 
-    // signal
+    // Signal rendering
     stroke(C_GREEN);
     strokeWeight(1.5);
     noFill();

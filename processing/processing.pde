@@ -3,13 +3,13 @@
 // Branch: processing (Fuori Servizio, CMLS 2025-2026)
 //
 // Layout: 1280 x 720, split vertical 50/50.
-//   left  -> ControlPanel  (config sliders + sensor/param bars + scope + spectrum)
-//   right -> DiverHUD      (top-down minimap + diver + BPM pulse + alarm)
+//   Left  -> ControlPanel  (config sliders + sensor/param bars + scope + spectrum)
+//   Right -> DiverHUD      (top-down minimap + diver + BPM pulse + alarm)
 //
 // OSC:
-//   listen  9003  <- JUCE sends /viz/in/* and /viz/out/* (~25-30 Hz)
+//   Listen  9003  <- JUCE sends /viz/in/* and /viz/out/* (~25-30 Hz)
 //                 <- SC   sends /scope/amp and /scope/fft (~60 Hz, optional)
-//   send to 9002  -> JUCE  /cfg/* (one-shot on APPLY)
+//   Send to 9002  -> JUCE  /cfg/* (one-shot on APPLY)
 //
 // Synthetic underlying signals keep the UI visually alive when no OSC is
 // received. Real OSC overrides synthetics when it arrives.
@@ -19,7 +19,7 @@ import oscP5.*;
 import netP5.*;
 
 // -----------------------------------------------------------------------------
-// Palette ("deep ocean + industrial HUD" with phosphor green) — §13 of SoT
+// Palette ("Deep ocean + industrial HUD" with phosphor green) — §13 of SoT
 // -----------------------------------------------------------------------------
 final color C_BG          = #0A0F0A;
 final color C_GREEN       = #00FF66;
@@ -30,29 +30,31 @@ final color C_TEXT        = #E0FFD0;
 final color C_ALARM       = #FF3030;
 final color C_WARN        = #FFB000;
 
+PFont hudFont; // Custom UI font
+
 // -----------------------------------------------------------------------------
-// Shared state, written by oscEvent (network thread) or by synthetic update
-// (draw thread), read by panel draw methods. Single-writer per variable in
-// practice; numeric reads on float/int are atomic on the JVM so visual artefacts
-// are limited to a single-frame flicker at worst. Will be hardened later if
-// needed.
+// Shared State
+// Written by oscEvent (network thread) or by synthetic update (draw thread), 
+// read by panel draw methods. Single-writer per variable in practice; numeric 
+// reads on float/int are atomic on the JVM, limiting visual artifacts to a 
+// single-frame flicker at worst.
 // -----------------------------------------------------------------------------
 
-// 5 sensor inputs (mirror of JUCE's Inputs struct):
+// 5 Sensor inputs (mirroring JUCE's Inputs struct):
 float pan_in   = 0.0;   // [-1, +1]
 float width_in = 0.5;   // [0, 1]
 float depth_in = 0.5;   // [0, 1]
 float tilt_in  = 0.5;   // [0, 1]
-float speed_in = 0.0;   // joystick discrete in real Arduino, sweep here
+float speed_in = 0.0;   // Joystick discrete in real Arduino, sweep here
 
-// 5 cooked outputs (mirror of JUCE's Outputs struct after mapping):
+// 5 Cooked outputs (mirroring JUCE's Outputs struct after mapping):
 float reverb_out = 0.0; // [0, 1]
 float pan_out    = 0.0; // [-1, +1]
 float bpm_out    = 60;  // [40, 200]
 float freq_out   = 200; // [80, 800] Hz
 int   alarm_out  = 0;   // {0, 1}
 
-// Scope: ring buffer of last N audio samples (synthetic or from /scope/amp)
+// Scope: Ring buffer of the last N audio samples (synthetic or from /scope/amp)
 final int SCOPE_LEN = 256;
 float[] scope = new float[SCOPE_LEN];
 
@@ -60,65 +62,69 @@ float[] scope = new float[SCOPE_LEN];
 final int SPECTRUM_LEN = 32;
 float[] spectrum = new float[SPECTRUM_LEN];
 
-// Last time we saw a /scope/* OSC message (millis). If older than 2s, we fall
-// back to synthetic.
+// Last time we saw a /scope/* OSC message (millis). 
+// If older than 2s, we fall back to synthetic waveforms.
 int lastScopeOscMs = -10_000;
 
-// Same for /viz/* (input + cooked output values from JUCE). If older than 1s,
-// the synthetic underlying sweep takes over so the UI never sits still.
+// Last time we saw a /viz/* OSC message (input + cooked output values from JUCE). 
+// If older than 1s, the synthetic underlying sweep takes over so the UI stays alive.
 int lastVizOscMs   = -10_000;
 
 // -----------------------------------------------------------------------------
-// OSC + panel objects
+// OSC + Panel Objects
 // -----------------------------------------------------------------------------
 OscP5 oscP5;
-NetAddress juceConfigAddr;     // for sending /cfg/* on APPLY
+NetAddress juceConfigAddr;     // Target for sending /cfg/* on APPLY
 
 ControlPanel control;
 DiverHUD     hud;
 
 // -----------------------------------------------------------------------------
+// Setup & Draw Loop
+// -----------------------------------------------------------------------------
 void setup() {
   size(1280, 720);
   frameRate(60);
   background(C_BG);
+  
+  hudFont = createFont("Monospaced", 14); 
+  textFont(hudFont);
 
   oscP5 = new OscP5(this, 9003);
   juceConfigAddr = new NetAddress("127.0.0.1", 9002);
 
-  // Two panels, 50/50 split vertical
+  // Two panels, 50/50 vertical split
   control = new ControlPanel(0,   0, width / 2, height);
-  hud     = new DiverHUD   (width / 2, 0, width / 2, height);
+  hud     = new DiverHUD    (width / 2, 0, width / 2, height);
 
   println("Cave Diving Controller — Processing UI");
-  println("  listening for OSC on port 9003");
-  println("  will send /cfg/* to 127.0.0.1:9002");
+  println("  Listening for OSC on port 9003");
+  println("  Will send /cfg/* to 127.0.0.1:9002");
 }
 
 void draw() {
-  // Drive synthetic underlying state so the UI feels alive even without OSC.
+  // Drive synthetic underlying state so the UI feels alive even without OSC
   updateSynthetic();
 
   background(C_BG);
   control.draw();
   hud.draw();
 
-  // Vertical separator between panels (subtle, just dim green hairline)
+  // Vertical separator between panels (subtle dim green hairline)
   stroke(C_GREEN_DARK);
   strokeWeight(1);
   line(width / 2, 0, width / 2, height);
 }
 
 // -----------------------------------------------------------------------------
-// Synthetic underlying signals — overridden by real OSC when it arrives.
-// Until JUCE sends /viz/* and SC sends /scope/*, this is how the UI moves.
+// Synthetic Simulation Engine
+// Overridden by real OSC when it arrives. Until JUCE sends /viz/* and 
+// SC sends /scope/*, this keeps the UI elements moving dynamically.
 // -----------------------------------------------------------------------------
 void updateSynthetic() {
   float t = millis() / 1000.0;
 
   // Only drive the synthetic sweep if no recent /viz/* has been received.
-  // When JUCE is alive on the wire, oscEvent() already set the up-to-date
-  // values; running the synthetic here would overwrite them every frame.
   if (millis() - lastVizOscMs > 1000) {
     pan_in   = sin(TWO_PI * t / 5.0);
     width_in = 0.5 + 0.5 * sin(TWO_PI * t / 7.0);
@@ -126,36 +132,43 @@ void updateSynthetic() {
     tilt_in  = 0.5 + 0.5 * sin(TWO_PI * t / 11.0);
     speed_in = 5.0 + 5.0 * sin(TWO_PI * t / 13.0);
 
-    // Synthetic outputs mirror JUCE's applyMappingAndSend so the demo looks
-    // realistic without a JUCE engine running.
+    // Synthetic outputs mirror JUCE's applyMappingAndSend.
+    // NOW USING ACTIVE VALUES (updated only on APPLY)
     reverb_out = constrain(depth_in, 0, 1);
     pan_out    = constrain(pan_in, -1, +1);
-    bpm_out    = constrain(40 + (1 - width_in) * 160, 40, 200);
-    freq_out   = 80 + constrain(tilt_in, 0, 1) * (800 - 80);
-    alarm_out  = (speed_in > 3.0) ? 1 : 0;
+    
+    float targetBpm = control.activeBpmMin + (1.0 - width_in) * (control.activeBpmMax - control.activeBpmMin);
+    bpm_out    = constrain(targetBpm, control.activeBpmMin, control.activeBpmMax);
+    
+    float targetFreq = control.activeFreqMin + tilt_in * (control.activeFreqMax - control.activeFreqMin);
+    freq_out   = constrain(targetFreq, control.activeFreqMin, control.activeFreqMax);
+    
+    alarm_out  = (speed_in > control.activeAlarmThr) ? 1 : 0;
   }
 
-  // Scope: if no recent /scope/amp, synthesise sin(2pi * freq * t).
+  // Scope: If no recent /scope/amp is received, synthesize sin(2pi * freq * t).
   if (millis() - lastScopeOscMs > 2000) {
     for (int i = 0; i < SCOPE_LEN; i++) {
       float sampleTime = t - (SCOPE_LEN - 1 - i) * 0.0002;  // ~50ms window
       scope[i] = sin(TWO_PI * freq_out * sampleTime) * 0.8;
     }
-    // Spectrum: dim base + peak at freq's bin.
-    int peakBin = (int) map(freq_out, 80, 800, 0, SPECTRUM_LEN - 1);
+    
+    // Spectrum: Dim base + peak at freq's bin (using active values)
+    int peakBin = (int) map(freq_out, control.activeFreqMin, control.activeFreqMax, 0, SPECTRUM_LEN - 1);
     peakBin = constrain(peakBin, 0, SPECTRUM_LEN - 1);
     for (int i = 0; i < SPECTRUM_LEN; i++) {
-      spectrum[i] = 0.08 + 0.04 * sin(t * 3 + i * 0.5);  // shimmer
+      spectrum[i] = 0.08 + 0.04 * sin(t * 3 + i * 0.5);  // Shimmer effect
     }
     spectrum[peakBin] = 0.85;
-    // soft bandwidth around the peak
-    if (peakBin > 0)               spectrum[peakBin - 1] = max(spectrum[peakBin - 1], 0.45);
+    
+    // Soft bandwidth around the peak
+    if (peakBin > 0)                spectrum[peakBin - 1] = max(spectrum[peakBin - 1], 0.45);
     if (peakBin < SPECTRUM_LEN - 1) spectrum[peakBin + 1] = max(spectrum[peakBin + 1], 0.45);
   }
 }
 
 // -----------------------------------------------------------------------------
-// OSC routing. Called on the OscP5 receiver thread.
+// OSC Routing (Called on the OscP5 receiver thread)
 // -----------------------------------------------------------------------------
 void oscEvent(OscMessage msg) {
   String addr = msg.addrPattern();
@@ -175,9 +188,8 @@ void oscEvent(OscMessage msg) {
   else if (addr.equals("/viz/out/freq"))   freq_out   = msg.get(0).floatValue();
   else if (addr.equals("/viz/out/alarm"))  alarm_out  = msg.get(0).intValue();
 
-  // Real scope/spectrum from SC (optional)
+  // Real scope/spectrum from SuperCollider (optional)
   else if (addr.equals("/scope/amp")) {
-    // expects N float args = ring of samples (or single peak amplitude)
     int n = min(msg.typetag().length(), SCOPE_LEN);
     for (int i = 0; i < n; i++) scope[i] = msg.get(i).floatValue();
     lastScopeOscMs = millis();
@@ -187,4 +199,51 @@ void oscEvent(OscMessage msg) {
     for (int i = 0; i < n; i++) spectrum[i] = msg.get(i).floatValue();
     lastScopeOscMs = millis();
   }
+}
+
+// -----------------------------------------------------------------------------
+// Mouse Interaction Routing
+// -----------------------------------------------------------------------------
+void mousePressed() {
+  if (control.isApplyClicked(mouseX, mouseY)) {
+    sendConfigToJuce();
+  } else {
+    control.handleMousePressed(mouseX, mouseY);
+  }
+}
+
+void mouseDragged() {
+  control.handleMouseDragged(mouseX, mouseY);
+}
+
+void mouseReleased() {
+  control.handleMouseReleased();
+}
+
+// -----------------------------------------------------------------------------
+// Send Configuration to JUCE via OSC
+// -----------------------------------------------------------------------------
+void sendConfigToJuce() {
+  // 1. Update "active" values with current UI slider values
+  control.activeBpmMin   = control.cfgBpmMin;
+  control.activeBpmMax   = control.cfgBpmMax;
+  control.activeFreqMin  = control.cfgFreqMin;
+  control.activeFreqMax  = control.cfgFreqMax;
+  control.activeAlarmThr = control.cfgAlarmThr;
+
+  // 2. Send everything via OSC as a single packaged message
+  OscMessage msg = new OscMessage("/cfg/apply");
+  msg.add(control.activeBpmMin);
+  msg.add(control.activeBpmMax);
+  msg.add(control.activeFreqMin);
+  msg.add(control.activeFreqMax);
+  msg.add(control.activeAlarmThr);
+  
+  oscP5.send(msg, juceConfigAddr);
+  control.lastApplyMs = millis(); // Trigger visual UI feedback on the button
+  
+  println("APPLY CLICKED: Configuration sent to JUCE at " + juceConfigAddr);
+  println(" -> BPM Range: " + control.activeBpmMin + " to " + control.activeBpmMax);
+  println(" -> Freq Range: " + control.activeFreqMin + " to " + control.activeFreqMax);
+  println(" -> Alarm Thr: " + control.activeAlarmThr);
 }
