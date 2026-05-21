@@ -1,6 +1,6 @@
 OSC messages tree used by Arduino part
 
-OSC/
+(ROOT)/
 |
 |--------SENSORS/
 		|
