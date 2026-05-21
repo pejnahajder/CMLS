@@ -5,9 +5,7 @@ var simWin, padView, pitchSlider, alarmButton;
 
 s.waitForBoot({
 
-    // ==========================================
-    // 1. IL MOTORE AUDIO PURO (Il tuo codice definitivo)
-    // ==========================================
+
     SynthDef(\oscBeep, {
         arg out = 0, freq = 880, bpm = 120, pan = 0, reverb = 0.2, amp = 0.2;
         var beatRate, gate, env, sig, dry, wet;
@@ -43,9 +41,7 @@ s.waitForBoot({
     OSCdef(\alarmGate, { |msg| ~alarm.set(\gate, msg[1].asInteger); }, "/alarm/gate");
 
 
-    // ==========================================
-    // 2. IL SIMULATORE (Simula il lavoro di Processing)
-    // ==========================================
+
     simWin = Window("Simulatore Processing -> SuperCollider", Rect(200, 200, 620, 500));
     simWin.view.background_(Color.grey(0.15));
     
