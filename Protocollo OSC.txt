@@ -1,0 +1,38 @@
+Parametri di Rete:
+
+Indirizzo IP: 127.0.0.1 (se fate girare Processing e SC sullo stesso computer) oppure l'IP del computer su cui gira SC.
+
+Porta di destinazione: 57120
+
+Protocollo e Range Valori:
+Nel mio codice ho inserito dei limitatori di sicurezza (clip). Anche se per errore inviate valori sballati, il motore audio non crasherà, ma si fermerà al limite consentito.
+
+/beep/pan (Panning laterale per evitare gli ostacoli)
+
+Tipo: Float da -1.0 a 1.0.
+
+Azione: 0.0 è il centro perfetto. Inviate valori verso -1.0 per spostare il suono a sinistra (es. muro a destra), verso 1.0 per spostarlo a destra.
+
+/beep/reverb (Vicinanza parete frontale)
+
+Tipo: Float da 0.0 a 1.0.
+
+Azione: Inviate 1.0 per il massimo riverbero (strada libera). Scendete verso 0.0 se un ostacolo è davanti (il suono diventa secco per l'effetto cavità chiusa).
+
+/beep/bpm (Ritmo di allarme prossimità)
+
+Tipo: Float da 30 a 600.
+
+Azione: Valutate il sensore con il pericolo maggiore e applicate una curva esponenziale. Es. 60 bpm a distanza di sicurezza, fino a schizzare a 600 bpm vicino all'impatto.
+
+/beep/pitch (Accelerometro Testa / Bussola zenitale)
+
+Tipo: Float in Hertz. Range raccomandato da 200 a 1200.
+
+Azione: Sub guarda in basso (inclinazione negativa) = frequenze gravi (es. 200). Sub guarda in alto (inclinazione positiva) = frequenze acute (es. 1000).
+
+/alarm/gate (Allarme barometro - Risalita rapida)
+
+Tipo: Int 0 oppure 1.
+
+Azione: Se il delta del barometro supera la soglia di allarme, inviate 1 (attiva l'allarme dissonante indipendente dal ping). Quando la risalita torna sicura, inviate 0 (spegne l'allarme).
