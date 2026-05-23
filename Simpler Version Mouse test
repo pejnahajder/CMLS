@@ -1,0 +1,117 @@
+(
+// Indirizzo di loopback per inviare i messaggi OSC a sé stesso
+var scAddr = NetAddr("127.0.0.1", NetAddr.langPort);
+var simWin, padView, pitchSlider, alarmButton;
+
+s.waitForBoot({
+
+
+    SynthDef(\oscBeep, {
+        arg out = 0, freq = 880, bpm = 120, pan = 0, reverb = 0.2, amp = 0.2;
+        var beatRate, gate, env, sig, dry, wet;
+        
+        beatRate = bpm / 60;
+        gate = LFPulse.kr(beatRate, width: 0.5);
+        env = Lag.kr(gate, 0.01);
+        sig = SinOsc.ar(freq) * env * amp;
+        dry = Pan2.ar(sig, pan);
+        
+        wet = FreeVerb2.ar(dry[0], dry[1], mix: reverb, room: 0.7, damp: 0.5);
+        Out.ar(out, wet);
+    }).add;
+
+    SynthDef(\alarmSynth, {
+        arg out = 0, gate = 0, amp = 0.4;
+        var env, sig;
+        env = EnvGen.kr(Env.asr(0.1, 1, 0.2), gate);
+        sig = Saw.ar([300, 314]) * LFPulse.kr(20).range(0.2, 1.0);
+        Out.ar(out, sig * env * amp);
+    }).add;
+
+    s.sync;
+
+    ~beep = Synth(\oscBeep);
+    ~alarm = Synth(\alarmSynth);
+
+    // Ricevitori OSC passivi
+    OSCdef(\beepPan, { |msg| ~beep.set(\pan, msg[1].asFloat.clip(-1, 1)); }, "/beep/pan");
+    OSCdef(\beepBpm, { |msg| ~beep.set(\bpm, msg[1].asFloat.clip(30, 600)); }, "/beep/bpm");
+    OSCdef(\beepReverb, { |msg| ~beep.set(\reverb, msg[1].asFloat.clip(0, 1)); }, "/beep/reverb");
+    OSCdef(\beepPitch, { |msg| ~beep.set(\freq, msg[1].asFloat.clip(20, 20000)); }, "/beep/pitch");
+    OSCdef(\alarmGate, { |msg| ~alarm.set(\gate, msg[1].asInteger); }, "/alarm/gate");
+
+
+
+    simWin = Window("Simulatore Processing -> SuperCollider", Rect(200, 200, 620, 500));
+    simWin.view.background_(Color.grey(0.15));
+    
+    // Pad Navigazione (X e Y)
+    padView = UserView(simWin, Rect(20, 20, 360, 360));
+    padView.background_(Color.grey(0.25));
+    padView.acceptsMouseOver_(true);
+    
+    StaticText(simWin, Rect(20, 390, 360, 80))
+        .string_("PAD NAVIGAZIONE:\nX: Panning (Centro sicuro, bordi = ostacolo)\nY: Riverbero (Basso = libero, Alto = muro in faccia)\nBPM: Accelerano vicino a qualsiasi bordo.")
+        .stringColor_(Color.white)
+        .align_(\center);
+
+    // Slider Pitch (Simula l'accelerometro della testa)
+    pitchSlider = EZSlider(simWin, Rect(400, 20, 80, 360), "Inclinazione\nTesta", ControlSpec(-90, 90, 'lin'), { |sl|
+        // Processing converte i gradi (-90 a 90) in Pitch acustico (200Hz a 1200Hz)
+        var pitchVal = sl.value.linlin(-90, 90, 200, 1200);
+        scAddr.sendMsg("/beep/pitch", pitchVal);
+    }, 0, layout: \vert);
+    pitchSlider.labelView.stringColor_(Color.white);
+
+    // Bottone Allarme (Simula il barometro)
+    alarmButton = Button(simWin, Rect(500, 20, 100, 360))
+        .states_([
+            ["ALLARME OFF\n(Premi)", Color.white, Color.grey(0.3)],
+            ["ALLARME ON\n(Rilascia)", Color.white, Color.red(0.7)]
+        ])
+        .action_({ |btn|
+            // Processing invia 1 per accendere, 0 per spegnere
+            scAddr.sendMsg("/alarm/gate", btn.value);
+        });
+
+    // La logica matematica del Pad (Esattamente quella che scriverà il tuo collega)
+    padView.mouseOverAction_({ |view, x, y|
+        var w = view.bounds.width;
+        var h = view.bounds.height;
+        var panVal, reverbVal, bpmVal, proxX, proxY, maxProx;
+
+        // A. PANNING: Mouse X da 0 a larghezza -> Pan da -1.0 a 1.0
+        panVal = x.linlin(0, w, -1.0, 1.0).clip(-1.0, 1.0);
+        
+        // B. VICINANZA MURI LATERALI: 0.0 al centro, 1.0 sui bordi dx/sx
+        proxX = (x / (w/2) - 1).abs;
+        
+        // C. VICINANZA MURO FRONTALE: 0.0 in basso (libero), 1.0 in alto (muro)
+        proxY = 1.0 - (y / h).clip(0.0, 1.0);
+        
+        // D. RIVERBERO: Inverso alla vicinanza frontale
+        reverbVal = proxY.linlin(0.0, 1.0, 0.8, 0.0);
+        
+        // E. BPM: Curva esponenziale basata sull'ostacolo più vicino in assoluto
+        maxProx = max(proxX, proxY);
+        bpmVal = maxProx.lincurve(0.0, 1.0, 60, 600, 4); // lincurve col '4' rende l'aumento esponenziale
+
+        // Invio dei dati finali a SuperCollider
+        scAddr.sendMsg("/beep/pan", panVal);
+        scAddr.sendMsg("/beep/reverb", reverbVal);
+        scAddr.sendMsg("/beep/bpm", bpmVal);
+    });
+    
+    // Rende il pad reattivo anche se clicchi e trascini
+    padView.mouseMoveAction_(padView.mouseOverAction);
+
+    simWin.front;
+    
+    // Spegne i suoni se chiudi la finestra
+    simWin.onClose_({ ~beep.free; ~alarm.free; });
+    
+    // Setup iniziale (mette il mouse virtuale in posizione "sicura" al centro-basso)
+    padView.mouseOverAction.value(padView, 180, 360);
+    scAddr.sendMsg("/beep/pitch", 500); // Pitch orizzontale neutro
+});
+)
