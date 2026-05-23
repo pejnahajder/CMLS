@@ -197,7 +197,7 @@ class ControlPanel {
     fill(C_GREEN_DIM);
     textSize(11);
     textAlign(LEFT, TOP);
-    text("COOKED PARAMS (to SC  /synth/* + /alarm/gate)", gx, gy);
+    text("COOKED PARAMS (to SC  /beep/* + /alarm/gate)", gx, gy);
     gy += 16;
     gy = drawValueBar(gx, gy, gw, "reverb", reverb_out, 0, 1, 3, C_HIGHLIGHT, false);
     gy = drawValueBar(gx, gy, gw, "pan",    pan_out,   -1, 1, 3, C_HIGHLIGHT, true);
