@@ -427,3 +427,6 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# Processing IDE recovery snapshots (sketch tab autosaves)
+*.autosave
