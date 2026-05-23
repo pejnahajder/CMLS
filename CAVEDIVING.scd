@@ -19,9 +19,11 @@ s.waitForBoot({
             bpm = 120,    // pulse speed, expressed as beats per minute
             pan = 0,      // stereo position: -1 left, 0 center, 1 right
             reverb = 0.2, // reverb mix amount: 0 dry, 1 wet
-            amp = 0.2;    // output volume
+            amp = 0.2,    // output volume
+		    controlGate = 1;	  // 0 = off, 1 = on
 
         var beatRate, gate, env, sig, wet, panned;
+
 
         // Convert BPM into pulses per second.
         beatRate = bpm / 60;
@@ -35,7 +37,7 @@ s.waitForBoot({
 
         // Generate the sine-wave beep,
         // then shape it with the envelope and amplitude.
-        sig = SinOsc.ar(freq) * env * amp;
+        sig = SinOsc.ar(freq) * env * amp * Lag.kr(controlGate.clip(0, 1), 0.05);
 
         // Add reverb to the signal.
         wet = FreeVerb.ar(sig, mix: reverb, room: 0.7, damp: 0.5);
@@ -55,7 +57,7 @@ s.waitForBoot({
 	SynthDef(\alarmSynth, {
 		arg out = 0,			// audio output bus
             gate = 0,			// 0 = off, 1 = on
-			amp = 0.04,			// alarm volume
+			amp = 0.1,			// alarm volume
 		    alarmType = 1;		// alarm type
 
 		var env, alarm1, alarm2, alarm3, sig;
@@ -144,6 +146,13 @@ s.waitForBoot({
 		~alarm.set(\alarmType, msg[1].asInteger.clip(1, 3));
 	}, "/alarm/type");
 
+	// OSC address: /beep/gate
+	// 1 = beeping on
+	// 2 = beeping off
+	OSCdef(\beepGate, { |msg|
+		~beep.set(\controlGate, msg[1].asInteger.clip(0, 1));
+	}, "/beep/gate");
+
 
     // Print confirmation in the SuperCollider post window.
     "\n*** AUDIO ENGINE READY - LISTENING FOR OSC ON PORT 57120 ***".postln;
@@ -172,9 +181,11 @@ OSCdef(\beepBpm).free;
 OSCdef(\beepReverb).free;
 OSCdef(\beepPitch).free;
 OSCdef(\alarmGate).free;
+OSCdef(\beepGate).free;
 
 "Audio stopped. Synths freed. OSC receivers removed.".postln;
 )
+
 
 // ------------------------------------------------------------
 // OSC TEST FUNCTIONS
@@ -211,7 +222,13 @@ OSCdef(\alarmGate).free;
 ~testAlarmType = { |val = 1|
 	~oscTestAddr.sendMsg("/alarm/type", val.clip(1, 3).asInteger);
 };
+
+// Beeping on/off test: 0 = off, 1 = on
+~testBeepGate = { |val = 1|
+	~oscTestAddr.sendMsg("/beep/gate", val.clip(0, 1).asInteger);
+};
 )
+~testBeepGate.(1);  // beepGate on/off
 
 ~testPan.(-1);      // hard left
 ~testPan.(1);       // hard right
