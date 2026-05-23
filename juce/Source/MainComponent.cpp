@@ -116,7 +116,7 @@ void MainComponent::paint (juce::Graphics& g)
 
     g.setColour (juce::Colours::lightblue);
     g.drawText ("INPUTS (from Arduino, /sensor/...)",    10,         top, colW - 20, rowH, juce::Justification::centredLeft);
-    g.drawText ("OUTPUTS (to SC, /synth/... + /alarm/gate)",  colW + 10,  top, colW - 20, rowH, juce::Justification::centredLeft);
+    g.drawText ("OUTPUTS (to SC, /beep/... + /alarm/gate)",  colW + 10,  top, colW - 20, rowH, juce::Justification::centredLeft);
 
     g.setColour (juce::Colours::white);
 
@@ -249,23 +249,30 @@ void MainComponent::applyMappingAndSend()
     // 0 = wall close, 1 = max distance. So depth=0 -> dry reverb (claustrophobia
     // feel), depth=1 -> wet (open space). Sign convention coherent across all.
 
-    // REVERB <- depth, linear in [0, 1].
-    outputs.reverb = std::clamp (depthIn, 0.0f, 1.0f);
+    // REVERB <- depth, power-2 curve. depth=1 (open space) -> reverb hugs 1 even for small
+    // deviations; reverb drops steeply only as depth nears 0 (claustrophobic). Per SC team
+    // request — small change near the safe origin, smoother feel.
+    const float depthClamped = std::clamp (depthIn, 0.0f, 1.0f);
+    const float depthShift = 1.0f - depthClamped;
+    outputs.reverb = 1.0f - (depthShift * depthShift);
 
     // PAN: identity passthrough. Arduino has already computed
     // gravity1 - gravity2 in [-1, +1], so we just clamp defensively.
     outputs.pan = std::clamp (panIn, -1.0f, 1.0f);
 
     // BPM: accelerates as the channel narrows. Range from Config (default [40, 200]).
-    // No defensive clamp on the result: lerp with frac in [0, 1] already stays inside
-    // [min(lo,hi), max(lo,hi)], so user-inverted ranges (bpmMin > bpmMax) reverse the
-    // mapping but never produce out-of-bounds output.
+    // Power-2 curve over (1 - width): bpm hugs bpmMin in safe (wide) state and ramps up
+    // steeply when the canal becomes narrow. Per SC team request.
+    // No defensive clamp on the result: (1 - widthClamped)^2 is in [0, 1], so output stays
+    // inside [min(lo,hi), max(lo,hi)] even with user-inverted bpmMin > bpmMax.
     const float widthClamped = std::clamp (widthIn, 0.0f, 1.0f);
+    const float widthShift = 1.0f - widthClamped;
     const float bpmLo = config.bpmMin.load();
     const float bpmHi = config.bpmMax.load();
-    outputs.bpm = bpmLo + (1.0f - widthClamped) * (bpmHi - bpmLo);
+    outputs.bpm = bpmLo + (widthShift * widthShift) * (bpmHi - bpmLo);
 
-    // FREQ: lerp(freqMin, freqMax, tilt) in Hz. Range from Config (default [80, 800]).
+    // FREQ: lerp(freqMin, freqMax, tilt) in Hz. Range from Config (default [80, 800];
+    // SC team recommends [200, 1200] for nicest tone, supports [20, 20000] hard limits).
     // ASSUMPTION: tilt neutral ~0.5 (head horizontal), to be verified at first board test.
     const float tiltClamped = std::clamp (tiltIn, 0.0f, 1.0f);
     const float freqLo = config.freqMin.load();
@@ -286,10 +293,11 @@ void MainComponent::sendOutputs()
         return;
 
     // Continuous control parameters: forwarded every Timer tick (~25 Hz on Windows).
-    forwardFloat ("/synth/reverb", outputs.reverb);
-    forwardFloat ("/synth/pan",    outputs.pan);
-    forwardFloat ("/synth/bpm",    outputs.bpm);
-    forwardFloat ("/synth/freq",   outputs.freq);
+    // SC's namespace is /beep/* — note /beep/pitch on the wire vs outputs.freq internally.
+    forwardFloat ("/beep/reverb", outputs.reverb);
+    forwardFloat ("/beep/pan",    outputs.pan);
+    forwardFloat ("/beep/bpm",    outputs.bpm);
+    forwardFloat ("/beep/pitch",  outputs.freq);
 
     // ALARM gate: event semantics, forward only on transitions. The -1 sentinel
     // forces the first send so SC starts with a known state.

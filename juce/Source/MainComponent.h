@@ -9,7 +9,7 @@
 
     Data flow:
 
-      Arduino MKR ──UDP:9000──► Inputs ─┐                                      ┌─► /synth/*, /alarm/gate ──► SC          :57120
+      Arduino MKR ──UDP:9000──► Inputs ─┐                                      ┌─► /beep/*, /alarm/gate  ──► SC          :57120
                                          │  Timer @30Hz                        │
       5 dev sliders (Manual mode) ──────►├──────────────► applyMappingAndSend ─┤
                                          │                                     │
@@ -22,12 +22,15 @@
       /sensor/position/tilt    float [0, 1]     (MMA accel X normalised, neutral ~0.5)
       /sensor/position/speed   float            (joystick, discrete {0, 2.5, 5, 7.5, 10})
 
-    Output contract (to SC, after our mapping):
-      /synth/reverb   float [0, 1]      (wet/dry)
-      /synth/pan      float [-1, +1]
-      /synth/bpm      float             (range from Config, default [40, 200])
-      /synth/freq     float Hz          (range from Config, default [80, 800])
+    Output contract (to SC's CAVEDIVING.scd, after our mapping):
+      /beep/reverb    float [0, 1]      (wet/dry, power-2 curve over depth: hugs 1 near safe origin)
+      /beep/pan       float [-1, +1]    (identity passthrough)
+      /beep/bpm       float             (range from Config, default [40, 200]; power-2 curve over (1 - width))
+      /beep/pitch     float Hz          (range from Config, default [80, 800]; linear over tilt)
       /alarm/gate     int   {0, 1}      (edge-triggered, threshold from Config, default 3.0)
+
+    Note: SC calls the frequency parameter "pitch", we call it "freq" internally and on the viz wire.
+    SC also supports /alarm/type (int 1..3) to pick alarm sound; not driven from JUCE — SC default is 1.
 
     Viz contract (to Processing UI on 9003, rate-constant every Timer tick):
       /viz/in/pan     /viz/in/width    /viz/in/depth   /viz/in/tilt   /viz/in/speed     (5 floats)
