@@ -9,9 +9,11 @@
 
     Data flow:
 
-      Arduino MKR ─OSC/UDP:9000─►  std::atomic Inputs  ─►  Timer @30Hz  ─►  Outputs  ─►  OSC/UDP:57120 to SuperCollider
-                                          ▲
-      5 dev sliders (Manual mode) ────────┘
+      Arduino MKR ──UDP:9000──► Inputs ─┐                                      ┌─► /synth/*, /alarm/gate ──► SC          :57120
+                                         │  Timer @30Hz                        │
+      5 dev sliders (Manual mode) ──────►├──────────────► applyMappingAndSend ─┤
+                                         │                                     │
+      Processing UI ──UDP:9002 /cfg─────► Config                               └─► /viz/in/*, /viz/out/*  ──► Processing  :9003
 
     Input contract (from Arduino, branch `arduino`):
       /sensor/space/pan        float [-1, +1]   (already cooked = gravity1 - gravity2)
@@ -23,13 +25,17 @@
     Output contract (to SC, after our mapping):
       /synth/reverb   float [0, 1]      (wet/dry)
       /synth/pan      float [-1, +1]
-      /synth/bpm      float [40, 200]
-      /synth/freq     float Hz [80, 800]
-      /alarm/gate     int   {0, 1}      (edge-triggered, not rate-constant)
+      /synth/bpm      float             (range from Config, default [40, 200])
+      /synth/freq     float Hz          (range from Config, default [80, 800])
+      /alarm/gate     int   {0, 1}      (edge-triggered, threshold from Config, default 3.0)
 
     Viz contract (to Processing UI on 9003, rate-constant every Timer tick):
       /viz/in/pan     /viz/in/width    /viz/in/depth   /viz/in/tilt   /viz/in/speed     (5 floats)
       /viz/out/reverb /viz/out/pan     /viz/out/bpm    /viz/out/freq  /viz/out/alarm    (4 floats + 1 int)
+
+    Config contract (from Processing UI on port 9002, one-shot on APPLY click):
+      /cfg/apply   5 floats positional: (bpmMin, bpmMax, freqMin, freqMax, alarmThr).
+                   No streaming, no per-field address. Defaults if no APPLY: (40, 200, 80, 800, 3.0).
 */
 class MainComponent  : public juce::Component,
                        public juce::OSCReceiver::Listener<juce::OSCReceiver::MessageLoopCallback>,
@@ -89,6 +95,19 @@ private:
     };
     Outputs outputs;
 
+    // Configuration values received from the Processing UI via /cfg/apply.
+    // Defaults match the original hardcoded mapping, so the engine works
+    // identically until APPLY is clicked at least once.
+    struct Config
+    {
+        std::atomic<float> bpmMin   {  40.0f };
+        std::atomic<float> bpmMax   { 200.0f };
+        std::atomic<float> freqMin  {  80.0f };
+        std::atomic<float> freqMax  { 800.0f };
+        std::atomic<float> alarmThr {   3.0f };
+    };
+    Config config;
+
     // Last alarm gate value forwarded to SC. Edge-trigger sentinel: -1 forces
     // the very first send so SC starts with a known state.
     int lastAlarmSent = -1;
@@ -101,9 +120,10 @@ private:
     juce::ToggleButton btnManual { "Manual mode" };
     juce::ToggleButton btnSendSC { "Send to SC" };
 
-    juce::OSCReceiver oscReceiver;
-    juce::OSCSender   oscSender;     // -> SuperCollider on 57120 (cooked params)
-    juce::OSCSender   oscSenderViz;  // -> Processing on 9003 (live monitoring)
+    juce::OSCReceiver oscReceiver;     // <- Arduino on 9000 (raw sensor streams)
+    juce::OSCReceiver oscReceiverCfg;  // <- Processing on 9002 (/cfg/apply)
+    juce::OSCSender   oscSender;       // -> SuperCollider on 57120 (cooked params)
+    juce::OSCSender   oscSenderViz;    // -> Processing on 9003 (live monitoring)
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainComponent)
 };

@@ -1,5 +1,6 @@
 #include "MainComponent.h"
 #include <algorithm>   // std::clamp
+#include <cmath>       // std::isfinite
 
 //======================= INITIALIZATION & TEARDOWN =======================================================
 MainComponent::MainComponent()
@@ -12,6 +13,14 @@ MainComponent::MainComponent()
         juce::Logger::writeToLog ("OSC Receiver connected to port 9000");
 
     oscReceiver.addListener (this);
+
+    // Listen for /cfg/apply from the Processing UI on port 9002.
+    if (! oscReceiverCfg.connect (9002))
+        juce::Logger::writeToLog ("Error: Could not connect Config OSC Receiver to port 9002");
+    else
+        juce::Logger::writeToLog ("Config OSC Receiver connected to port 9002");
+
+    oscReceiverCfg.addListener (this);
 
     // Transmit to SC (sclang, default port 57120).
     if (! oscSender.connect ("127.0.0.1", 57120))
@@ -67,6 +76,8 @@ MainComponent::~MainComponent()
     stopTimer();
     oscReceiver.removeListener (this);
     oscReceiver.disconnect();
+    oscReceiverCfg.removeListener (this);
+    oscReceiverCfg.disconnect();
     oscSender.disconnect();
     oscSenderViz.disconnect();
 }
@@ -94,7 +105,7 @@ void MainComponent::paint (juce::Graphics& g)
 
     g.setColour (juce::Colours::white);
     g.setFont (16.0f);
-    g.drawText ("Cave Diving Controller - OSC in 9000 / out 57120",
+    g.drawText ("Cave Diving Controller - OSC in 9000+9002 / out 57120+9003",
                 10, 10, getWidth() - 20, 24, juce::Justification::centredLeft);
 
     g.setFont (14.0f);
@@ -156,18 +167,52 @@ void MainComponent::resized()
 }
 
 //======================== OSC DATA HANDLING & PROCESSING ======================================================
-// Called when an OSC message arrives (dispatched on the message/UI thread).
-// In OSC mode: update atomic input + mirror in the slider (read-only display).
-// In Manual mode: ignore network input.
+// Called on the message/UI thread for any OSC message arriving on either receiver.
+// Address-based dispatch:
+//   /cfg/apply        -> Config (Processing on 9002), unconditional.
+//   /sensor/...       -> Inputs + slider mirror (Arduino on 9000), ignored in Manual mode.
 void MainComponent::oscMessageReceived (const juce::OSCMessage& message)
 {
+    const auto addr = message.getAddressPattern();
+
+    // Configuration from Processing — bundled 5-float message. Applied unconditionally
+    // (not gated by Manual mode: the config drives the mapping regardless of input source).
+    if (addr == "/cfg/apply")
+    {
+        if (message.size() != 5)
+            return;
+        for (int i = 0; i < 5; ++i)
+            if (! message[i].isFloat32())
+                return;
+
+        const float v0 = message[0].getFloat32();
+        const float v1 = message[1].getFloat32();
+        const float v2 = message[2].getFloat32();
+        const float v3 = message[3].getFloat32();
+        const float v4 = message[4].getFloat32();
+
+        if (! std::isfinite (v0) || ! std::isfinite (v1) || ! std::isfinite (v2)
+         || ! std::isfinite (v3) || ! std::isfinite (v4))
+            return;
+
+        config.bpmMin   = v0;
+        config.bpmMax   = v1;
+        config.freqMin  = v2;
+        config.freqMax  = v3;
+        config.alarmThr = v4;
+
+        juce::Logger::writeToLog ("/cfg/apply: bpm=[" + juce::String (v0, 1) + ", " + juce::String (v1, 1)
+                                 + "] freq=[" + juce::String (v2, 0) + ", " + juce::String (v3, 0)
+                                 + "] alarmThr=" + juce::String (v4, 2));
+        return;
+    }
+
+    // Sensor streams from Arduino — Manual mode silences the network in favour of sliders.
     if (manualMode.load())
         return;
 
     if (message.size() != 1)
         return;
-
-    const auto addr = message.getAddressPattern();
 
     auto applyFloat = [&] (std::atomic<float>& target, juce::Slider& s)
     {
@@ -211,20 +256,26 @@ void MainComponent::applyMappingAndSend()
     // gravity1 - gravity2 in [-1, +1], so we just clamp defensively.
     outputs.pan = std::clamp (panIn, -1.0f, 1.0f);
 
-    // BPM: accelerates as the channel narrows. Arduino has already computed
-    // width = (gravity1 + gravity2) / 2 in [0, 1] -- 0 = both walls close.
-    outputs.bpm = std::clamp (40.0f + (1.0f - widthIn) * 160.0f, 40.0f, 200.0f);
+    // BPM: accelerates as the channel narrows. Range from Config (default [40, 200]).
+    // No defensive clamp on the result: lerp with frac in [0, 1] already stays inside
+    // [min(lo,hi), max(lo,hi)], so user-inverted ranges (bpmMin > bpmMax) reverse the
+    // mapping but never produce out-of-bounds output.
+    const float widthClamped = std::clamp (widthIn, 0.0f, 1.0f);
+    const float bpmLo = config.bpmMin.load();
+    const float bpmHi = config.bpmMax.load();
+    outputs.bpm = bpmLo + (1.0f - widthClamped) * (bpmHi - bpmLo);
 
-    // FREQ: lerp(80, 800, tilt) in Hz. ASSUMPTION: tilt neutral ~0.5 (head
-    // horizontal), to be verified at first board test.
+    // FREQ: lerp(freqMin, freqMax, tilt) in Hz. Range from Config (default [80, 800]).
+    // ASSUMPTION: tilt neutral ~0.5 (head horizontal), to be verified at first board test.
     const float tiltClamped = std::clamp (tiltIn, 0.0f, 1.0f);
-    outputs.freq = 80.0f + tiltClamped * (800.0f - 80.0f);
+    const float freqLo = config.freqMin.load();
+    const float freqHi = config.freqMax.load();
+    outputs.freq = freqLo + tiltClamped * (freqHi - freqLo);
 
-    // ALARM: gate triggered when joystick speed exceeds threshold.
-    // ASSUMPTION: threshold 3.0f catches 3 of 4 joystick directions (skips
-    // "light right" = 2.5). Edge-triggered in sendOutputs().
-    constexpr float ALARM_THRESHOLD = 3.0f;
-    outputs.alarm = (speedIn > ALARM_THRESHOLD) ? 1 : 0;
+    // ALARM: gate triggered when joystick speed exceeds threshold (from Config, default 3.0).
+    // Conceptually the source is a barometer-delta (rapid ascent → embolism risk); the joystick
+    // is the demo proxy. Edge-triggered downstream in sendOutputs().
+    outputs.alarm = (speedIn > config.alarmThr.load()) ? 1 : 0;
 
     sendOutputs();
 }
