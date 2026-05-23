@@ -23,9 +23,9 @@
       /sensor/position/speed   float            (joystick, discrete {0, 2.5, 5, 7.5, 10})
 
     Output contract (to SC's CAVEDIVING.scd, after our mapping):
-      /beep/reverb    float [0, 1]      (wet/dry, power-2 curve over depth: hugs 1 near safe origin)
+      /beep/reverb    float [0, 1]      (wet/dry, power-2 curve over width: hugs 1 near safe origin = wide canal)
       /beep/pan       float [-1, +1]    (identity passthrough)
-      /beep/bpm       float             (range from Config, default [40, 200]; power-2 curve over (1 - width))
+      /beep/bpm       float             (range from Config, default [40, 200]; power-2 curve over (1 - depth) = panic as front wall approaches)
       /beep/pitch     float Hz          (range from Config, default [80, 800]; linear over tilt)
       /alarm/gate     int   {0, 1}      (edge-triggered, threshold from Config, default 3.0)
 

@@ -133,11 +133,12 @@ void updateSynthetic() {
     speed_in = 5.0 + 5.0 * sin(TWO_PI * t / 13.0);
 
     // Synthetic outputs mirror JUCE's applyMappingAndSend.
-    // NOW USING ACTIVE VALUES (updated only on APPLY)
-    reverb_out = constrain(depth_in, 0, 1);
+    // Reverb driven by width (wide canal -> wet), BPM driven by depth (close wall -> fast).
+    // Curve kept linear here; JUCE uses power-2 — small mismatch only during the synthetic fallback.
+    reverb_out = constrain(width_in, 0, 1);
     pan_out    = constrain(pan_in, -1, +1);
-    
-    float targetBpm = control.activeBpmMin + (1.0 - width_in) * (control.activeBpmMax - control.activeBpmMin);
+
+    float targetBpm = control.activeBpmMin + (1.0 - depth_in) * (control.activeBpmMax - control.activeBpmMin);
     bpm_out    = constrain(targetBpm, control.activeBpmMin, control.activeBpmMax);
     
     float targetFreq = control.activeFreqMin + tilt_in * (control.activeFreqMax - control.activeFreqMin);

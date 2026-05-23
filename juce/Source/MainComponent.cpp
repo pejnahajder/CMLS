@@ -253,27 +253,26 @@ void MainComponent::applyMappingAndSend()
     // 0 = wall close, 1 = max distance. So depth=0 -> dry reverb (claustrophobia
     // feel), depth=1 -> wet (open space). Sign convention coherent across all.
 
-    // REVERB <- depth, power-2 curve. depth=1 (open space) -> reverb hugs 1 even for small
-    // deviations; reverb drops steeply only as depth nears 0 (claustrophobic). Per SC team
-    // request — small change near the safe origin, smoother feel.
-    const float depthClamped = std::clamp (depthIn, 0.0f, 1.0f);
-    const float depthShift = 1.0f - depthClamped;
-    outputs.reverb = 1.0f - (depthShift * depthShift);
+    // REVERB <- width, power-2 curve. width=1 (wide canal, safe/open) -> reverb hugs 1 even
+    // for small deviations; reverb drops steeply only as the canal narrows (dry / cramped feel).
+    const float widthClamped = std::clamp (widthIn, 0.0f, 1.0f);
+    const float widthShift = 1.0f - widthClamped;
+    outputs.reverb = 1.0f - (widthShift * widthShift);
 
     // PAN: identity passthrough. Arduino has already computed
     // gravity1 - gravity2 in [-1, +1], so we just clamp defensively.
     outputs.pan = std::clamp (panIn, -1.0f, 1.0f);
 
-    // BPM: accelerates as the channel narrows. Range from Config (default [40, 200]).
-    // Power-2 curve over (1 - width): bpm hugs bpmMin in safe (wide) state and ramps up
-    // steeply when the canal becomes narrow. Per SC team request.
-    // No defensive clamp on the result: (1 - widthClamped)^2 is in [0, 1], so output stays
+    // BPM: accelerates as the front wall approaches. Range from Config (default [40, 200]).
+    // Power-2 curve over (1 - depth): bpm hugs bpmMin in safe (far) state and ramps up
+    // steeply when depth nears 0 (collision panic).
+    // No defensive clamp on the result: (1 - depthClamped)^2 is in [0, 1], so output stays
     // inside [min(lo,hi), max(lo,hi)] even with user-inverted bpmMin > bpmMax.
-    const float widthClamped = std::clamp (widthIn, 0.0f, 1.0f);
-    const float widthShift = 1.0f - widthClamped;
+    const float depthClamped = std::clamp (depthIn, 0.0f, 1.0f);
+    const float depthShift = 1.0f - depthClamped;
     const float bpmLo = config.bpmMin.load();
     const float bpmHi = config.bpmMax.load();
-    outputs.bpm = bpmLo + (widthShift * widthShift) * (bpmHi - bpmLo);
+    outputs.bpm = bpmLo + (depthShift * depthShift) * (bpmHi - bpmLo);
 
     // FREQ: lerp(freqMin, freqMax, tilt) in Hz. Range from Config (default [80, 800];
     // SC team recommends [200, 1200] for nicest tone, supports [20, 20000] hard limits).
