@@ -7,10 +7,10 @@ MainComponent::MainComponent()
 {
     // Listen for OSC from the Arduino MKR (in AP mode, sends to 192.168.4.2:9000).
     // Bound to 0.0.0.0 so it also accepts localhost from the fake tools.
-    if (! oscReceiver.connect (9000))
-        juce::Logger::writeToLog ("Error: Could not connect OSC Receiver to port 9000");
+    if (! oscReceiver.connect (9111))
+        juce::Logger::writeToLog ("Error: Could not connect OSC Receiver to port 9111");
     else
-        juce::Logger::writeToLog ("OSC Receiver connected to port 9000");
+        juce::Logger::writeToLog ("OSC Receiver connected to port 9111");
 
     oscReceiver.addListener (this);
 
@@ -25,11 +25,13 @@ MainComponent::MainComponent()
     // Transmit to SC (sclang, default port 57120).
     if (! oscSender.connect ("127.0.0.1", 57120))
         juce::Logger::writeToLog ("Error: Could not connect OSC Sender to port 57120");
-
+    else
+        juce::Logger::writeToLog ("SuperCollider connected");
     // Transmit to the Processing UI on 9003 (live monitoring of inputs + outputs).
     if (! oscSenderViz.connect ("127.0.0.1", 9003))
         juce::Logger::writeToLog ("Error: Could not connect viz OSC Sender to port 9003");
-
+    else
+        juce::Logger::writeToLog ("Graphical feedback connected");
     // --- Sliders (5 floats, with three different ranges) ---
     auto setupSlider = [this] (juce::Slider& s, juce::Label& lbl, const juce::String& name,
                                std::atomic<float>& target,
@@ -173,6 +175,8 @@ void MainComponent::resized()
 //   /sensor/...       -> Inputs + slider mirror (Arduino on 9000), ignored in Manual mode.
 void MainComponent::oscMessageReceived (const juce::OSCMessage& message)
 {
+    juce::Logger::writeToLog ("OSC IN: " + message.getAddressPattern().toString());
+    
     const auto addr = message.getAddressPattern();
 
     // Configuration from Processing — bundled 5-float message. Applied unconditionally
