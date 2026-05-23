@@ -1,0 +1,14 @@
+OSC messages tree used by Arduino part
+
+(ROOT)/
+|
+|--------SENSORS/
+		|
+		|--SPACE/
+		|	|--PAN
+		|	|--WIDTH
+		|	|--DEPTH
+		|		
+		|--POSITION/
+			|--TILT
+			|--SPEED
