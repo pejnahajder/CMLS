@@ -3,13 +3,13 @@
 // Branch: processing (Fuori Servizio, CMLS 2025-2026)
 //
 // Layout: 1280 x 720, split vertical 50/50.
-//   Left  -> ControlPanel  (config sliders + sensor/param bars + scope + spectrum)
+//   Left  -> ControlPanel  (config sliders + sensor/param bars + scope)
 //   Right -> DiverHUD      (top-down minimap + diver + BPM pulse + alarm)
 //
 // OSC:
 //   Listen  9003  <- JUCE sends /viz/in/* and /viz/out/* (~25-30 Hz)
-//                 <- SC   sends /scope/amp and /scope/fft (~60 Hz, optional)
-//   Send to 9002  -> JUCE  /cfg/* (one-shot on APPLY)
+//                 <- SC   sends /scope/amp (~60 Hz, optional)
+//   Send to 9002  -> JUCE  /cfg/apply (one-shot on APPLY)
 //
 // Synthetic underlying signals keep the UI visually alive when no OSC is
 // received. Real OSC overrides synthetics when it arrives.
@@ -58,12 +58,8 @@ int   alarm_out  = 0;   // {0, 1}
 final int SCOPE_LEN = 256;
 float[] scope = new float[SCOPE_LEN];
 
-// Spectrum: 32 frequency bins (synthetic or from /scope/fft)
-final int SPECTRUM_LEN = 32;
-float[] spectrum = new float[SPECTRUM_LEN];
-
-// Last time we saw a /scope/* OSC message (millis). 
-// If older than 2s, we fall back to synthetic waveforms.
+// Last time we saw a /scope/amp OSC message (millis).
+// If older than 2s, we fall back to a synthetic sine.
 int lastScopeOscMs = -10_000;
 
 // Last time we saw a /viz/* OSC message (input + cooked output values from JUCE). 
@@ -74,7 +70,7 @@ int lastVizOscMs   = -10_000;
 // OSC + Panel Objects
 // -----------------------------------------------------------------------------
 OscP5 oscP5;
-NetAddress juceConfigAddr;     // Target for sending /cfg/* on APPLY
+NetAddress juceConfigAddr;     // Target for sending /cfg/apply on APPLY
 
 ControlPanel control;
 DiverHUD     hud;
@@ -99,7 +95,7 @@ void setup() {
 
   println("Cave Diving Controller — Processing UI");
   println("  Listening for OSC on port 9003");
-  println("  Will send /cfg/* to 127.0.0.1:9002");
+  println("  Will send /cfg/apply to 127.0.0.1:9002");
 }
 
 void draw() {
@@ -118,8 +114,8 @@ void draw() {
 
 // -----------------------------------------------------------------------------
 // Synthetic Simulation Engine
-// Overridden by real OSC when it arrives. Until JUCE sends /viz/* and 
-// SC sends /scope/*, this keeps the UI elements moving dynamically.
+// Overridden by real OSC when it arrives. Until JUCE sends /viz/* and
+// SC sends /scope/amp, this keeps the UI elements moving dynamically.
 // -----------------------------------------------------------------------------
 void updateSynthetic() {
   float t = millis() / 1000.0;
@@ -153,18 +149,6 @@ void updateSynthetic() {
       float sampleTime = t - (SCOPE_LEN - 1 - i) * 0.0002;  // ~50ms window
       scope[i] = sin(TWO_PI * freq_out * sampleTime) * 0.8;
     }
-    
-    // Spectrum: Dim base + peak at freq's bin (using active values)
-    int peakBin = (int) map(freq_out, control.activeFreqMin, control.activeFreqMax, 0, SPECTRUM_LEN - 1);
-    peakBin = constrain(peakBin, 0, SPECTRUM_LEN - 1);
-    for (int i = 0; i < SPECTRUM_LEN; i++) {
-      spectrum[i] = 0.08 + 0.04 * sin(t * 3 + i * 0.5);  // Shimmer effect
-    }
-    spectrum[peakBin] = 0.85;
-    
-    // Soft bandwidth around the peak
-    if (peakBin > 0)                spectrum[peakBin - 1] = max(spectrum[peakBin - 1], 0.45);
-    if (peakBin < SPECTRUM_LEN - 1) spectrum[peakBin + 1] = max(spectrum[peakBin + 1], 0.45);
   }
 }
 
@@ -189,15 +173,10 @@ void oscEvent(OscMessage msg) {
   else if (addr.equals("/viz/out/freq"))   freq_out   = msg.get(0).floatValue();
   else if (addr.equals("/viz/out/alarm"))  alarm_out  = msg.get(0).intValue();
 
-  // Real scope/spectrum from SuperCollider (optional)
+  // Real scope from SuperCollider (optional)
   else if (addr.equals("/scope/amp")) {
     int n = min(msg.typetag().length(), SCOPE_LEN);
     for (int i = 0; i < n; i++) scope[i] = msg.get(i).floatValue();
-    lastScopeOscMs = millis();
-  }
-  else if (addr.equals("/scope/fft")) {
-    int n = min(msg.typetag().length(), SPECTRUM_LEN);
-    for (int i = 0; i < n; i++) spectrum[i] = msg.get(i).floatValue();
     lastScopeOscMs = millis();
   }
 }
