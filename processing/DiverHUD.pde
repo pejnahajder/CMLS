@@ -53,70 +53,112 @@ class DiverHUD {
   }
 
   // ---------------------------------------------------------------------------
-  // Minimap: Top-down view. 
-  // Channel walls move with `width`; front wall with `depth`;
-  // Diver position laterally with `pan`. 
-  // Uses a placeholder diver glyph (cursor arrow style).
+  // Minimap: Circular tactical radar.
+  // The navigable cave channel is "carved" out of a disc of hatched rock.
+  // Channel walls move with `width`, front wall with `depth`, diver with `pan`.
+  // No cardinal labels: in a silt-out the diver has no absolute heading
+  // reference, the readout is purely sensor-driven.
   // ---------------------------------------------------------------------------
   void drawMinimap(int gx, int gy, int gw, int gh) {
-    // Outer frame
+    // Circle geometry: centered, lowered a touch to clear the title.
+    float cx = gx + gw * 0.5;
+    float cy = gy + gh * 0.5 + 8;
+    float r  = min(gw * 0.5, gh * 0.5) - 24;
+
+    // Channel geometry, same drivers as before but now sized to the radius.
+    // width=1 -> walls open near the circle edge; width=0 -> narrow corridor.
+    float minHalfChan = 24;
+    float maxHalfChan = r * 0.78;
+    float halfChan = lerp(minHalfChan, maxHalfChan, constrain(width_in, 0, 1));
+    float wallL = cx - halfChan;
+    float wallR = cx + halfChan;
+    // depth=1 -> front wall flush with top of circle; depth=0 -> intrudes ~1.3r down.
+    float frontY = (cy - r) + (1.0 - constrain(depth_in, 0, 1)) * (r * 1.3);
+    // Diver below center, clearance from the front wall even at min depth.
+    float diverY = cy + r * 0.45;
+    float diverX = cx + constrain(pan_in, -1, 1) * (halfChan - 14);
+
+    // 1. Diagonal hatching covering the circle's bounding box (45 deg, ~7px spacing).
+    //    Lines overshoot the bbox vertically (right endpoint at cy+r+d, with
+    //    d up to 2r). Clip to the minimap rect to keep stray ends from leaking
+    //    into the lower status panel below; step 2 then masks away anything
+    //    outside the circle.
+    clip(gx, gy, gw, gh);
+    stroke(C_GREEN_DIM, 80);
+    strokeWeight(1);
+    for (float d = -2 * r; d <= 2 * r; d += 7) {
+      line(cx - r, cy - r + d, cx + r, cy + r + d);
+    }
+    noClip();
+
+    // 2. Mask: a rectangle around the minimap with a circular hole (CCW contour).
+    //    Filling with C_BG erases the hatch outside the circle.
+    fill(C_BG);
+    noStroke();
+    beginShape();
+    vertex(gx, gy);
+    vertex(gx + gw, gy);
+    vertex(gx + gw, gy + gh);
+    vertex(gx, gy + gh);
+    beginContour();
+    for (int i = 360; i >= 0; i -= 5) {
+      float a = radians(i);
+      vertex(cx + cos(a) * r, cy + sin(a) * r);
+    }
+    endContour();
+    endShape(CLOSE);
+
+    // 3. Carve the navigable channel inside the circle.
+    //    The rectangle extends past the circle laterally and at the bottom; the parts
+    //    outside were already C_BG (step 2), so they're a no-op visually.
+    fill(C_BG);
+    noStroke();
+    rect(wallL, frontY, wallR - wallL, (cy + r) - frontY);
+
+    // 4. Dotted grid inside the channel, anchored at (cx, cy), clipped to the circle.
+    drawChannelGrid(cx, cy, r, wallL, wallR, frontY);
+
+    // 5. Circle outline.
+    noFill();
+    stroke(C_GREEN_DIM);
+    strokeWeight(2);
+    ellipse(cx, cy, r * 2, r * 2);
+    strokeWeight(1);
+
+    // 6. Diver.
+    drawDiver(diverX, diverY);
+
+    // 7. Panel frame + title — drawn last so the mask (step 2) doesn't erase them.
     noFill();
     stroke(C_GREEN_DARK);
     rect(gx, gy, gw, gh);
-
     fill(C_GREEN_DIM);
     textSize(10);
     textAlign(LEFT, TOP);
     text("MINIMAP (top-down view)", gx + 4, gy + 4);
+  }
 
-    // Cave bounds inside the frame, with a margin
-    int innerX = gx + 30;
-    int innerY = gy + 28;
-    int innerW = gw - 60;
-    int innerH = gh - 56;
-
-    // Channel: Parallel vertical walls. 
-    // width=1 means walls wide apart at max.
-    // width=0 means walls collapse toward the center.
-    float minHalfChan = 30; // Never collapse to 0
-    float maxHalfChan = innerW * 0.5 - 8;
-    float halfChan    = lerp(minHalfChan, maxHalfChan, constrain(width_in, 0, 1));
-
-    float channelCx  = innerX + innerW * 0.5;
-    float wallLeftX  = channelCx - halfChan;
-    float wallRightX = channelCx + halfChan;
-
-    // Front wall (at the top of the view). 
-    // depth=0 -> wall close to the diver (low y, since y increases downward).
-    // depth=1 -> wall at the top of the frame.
-    float frontWallY = innerY + (1.0 - constrain(depth_in, 0, 1)) * (innerH * 0.6);
-
-    // Walls (solid lines)
-    stroke(C_GREEN);
-    strokeWeight(2);
-    line(wallLeftX,  frontWallY, wallLeftX,  innerY + innerH);
-    line(wallRightX, frontWallY, wallRightX, innerY + innerH);
-    line(wallLeftX,  frontWallY, wallRightX, frontWallY);
-
-    // Noise pattern (procedural texture for the walls)
-    stroke(C_GREEN_DARK);
-    strokeWeight(1);
-    int dy = 6;
-    float t = millis() / 1000.0;
-    for (float yy = frontWallY + 4; yy < innerY + innerH; yy += dy) {
-      float n = noise(t * 0.3, yy * 0.05);
-      float jL = (n - 0.5) * 8;
-      float jR = (noise(t * 0.3 + 100, yy * 0.05) - 0.5) * 8;
-      point(wallLeftX  + jL, yy);
-      point(wallRightX + jR, yy);
+  // Dot grid anchored at (cx, cy), spaced every 30px, clipped to the channel
+  // rectangle AND to the circle (small inset so dots don't graze the edge).
+  void drawChannelGrid(float cx, float cy, float r, float wallL, float wallR, float topY) {
+    float r2 = r * r * 0.94;
+    float botY = cy + r;
+    float spacing = 30;
+    fill(C_GREEN_DARK, 200);
+    noStroke();
+    int steps = (int) ceil(r / spacing);
+    for (int ix = -steps; ix <= steps; ix++) {
+      float gx2 = cx + ix * spacing;
+      if (gx2 < wallL || gx2 > wallR) continue;
+      for (int iy = -steps; iy <= steps; iy++) {
+        float gy2 = cy + iy * spacing;
+        if (gy2 < topY || gy2 > botY) continue;
+        float dx = gx2 - cx, dy = gy2 - cy;
+        if (dx * dx + dy * dy < r2) {
+          rect(gx2 - 1, gy2 - 1, 2, 2);
+        }
+      }
     }
-
-    // Diver: Centered in the channel, offset laterally by pan_in.
-    // pan_in < 0 -> diver moves towards left wall; > 0 -> towards right.
-    float diverY = innerY + innerH * 0.7;
-    float diverX = channelCx + constrain(pan_in, -1, 1) * (halfChan - 16);
-    drawDiver(diverX, diverY);
-    strokeWeight(1);
   }
 
   void drawDiver(float dx, float dy) {
