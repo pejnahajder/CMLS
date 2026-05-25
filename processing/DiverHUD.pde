@@ -377,7 +377,7 @@ class DiverHUD {
     fill(C_GREEN_DIM);
     textSize(10);
     textAlign(LEFT, TOP);
-    text("FRONT REVERB", gx + 4, gy + 4);
+    text("LATERAL REVERB", gx + 4, gy + 4);
 
     // Center and dimensions of the symbol
     float cx = gx + gw / 2.0;
