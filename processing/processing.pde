@@ -30,7 +30,8 @@ final color C_TEXT        = #E0FFD0;
 final color C_ALARM       = #FF3030;
 final color C_WARN        = #FFB000;
 
-PFont hudFont; // Custom UI font
+PFont hudFont;     // Custom UI font
+PImage helmetImg;  // Pre-dive splash helmet illustration (data/helmet.png)
 
 // -----------------------------------------------------------------------------
 // Shared State
@@ -87,8 +88,9 @@ void setup() {
   frameRate(60);
   background(C_BG);
   
-  hudFont = createFont("Monospaced", 14); 
+  hudFont = createFont("Monospaced", 14);
   textFont(hudFont);
+  helmetImg = loadImage("helmet.png");
 
   oscP5 = new OscP5(this, 9003);
   juceConfigAddr = new NetAddress("127.0.0.1", 9002);
