@@ -74,6 +74,10 @@ NetAddress juceConfigAddr;     // Target for sending /cfg/apply on APPLY
 
 ControlPanel control;
 DiverHUD     hud;
+SplashScreen splash;
+
+// Splash state: stays on the pre-dive screen until START DIVING is clicked.
+boolean dived = false;
 
 // -----------------------------------------------------------------------------
 // Setup & Draw Loop
@@ -89,9 +93,12 @@ void setup() {
   oscP5 = new OscP5(this, 9003);
   juceConfigAddr = new NetAddress("127.0.0.1", 9002);
 
-  // Two panels, 50/50 vertical split
+  // Two panels, 50/50 vertical split (post-splash)
   control = new ControlPanel(0,   0, width / 2, height);
   hud     = new DiverHUD    (width / 2, 0, width / 2, height);
+
+  // Full-window pre-dive splash
+  splash  = new SplashScreen(width, height);
 
   println("Cave Diving Controller — Processing UI");
   println("  Listening for OSC on port 9003");
@@ -99,10 +106,18 @@ void setup() {
 }
 
 void draw() {
+  background(C_BG);
+
+  if (!dived) {
+    // Pre-dive splash. OSC listener stays active in the background so the
+    // status line can detect JUCE connection live.
+    splash.draw();
+    return;
+  }
+
   // Drive synthetic underlying state so the UI feels alive even without OSC
   updateSynthetic();
 
-  background(C_BG);
   control.draw();
   hud.draw();
 
@@ -185,6 +200,10 @@ void oscEvent(OscMessage msg) {
 // Mouse Interaction Routing
 // -----------------------------------------------------------------------------
 void mousePressed() {
+  if (!dived) {
+    if (splash.isStartClicked(mouseX, mouseY)) dived = true;
+    return;
+  }
   if (control.isApplyClicked(mouseX, mouseY)) {
     sendConfigToJuce();
   } else {
@@ -193,10 +212,12 @@ void mousePressed() {
 }
 
 void mouseDragged() {
+  if (!dived) return;
   control.handleMouseDragged(mouseX, mouseY);
 }
 
 void mouseReleased() {
+  if (!dived) return;
   control.handleMouseReleased();
 }
 

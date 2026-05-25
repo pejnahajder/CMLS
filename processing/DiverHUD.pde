@@ -213,6 +213,10 @@ class DiverHUD {
     int now = millis();
     float dt = (now - lastFrameMs) / 1000.0;
     lastFrameMs = now;
+    // Cap dt so a long pause (e.g. the splash holding back this widget for
+    // seconds) doesn't accumulate into pulsePhase and blow up the radius on
+    // the first post-pause frame.
+    dt = min(dt, 0.1);
     pulsePhase += dt * (bpm_out / 60.0);
     if (pulsePhase >= 1.0) pulsePhase -= 1.0;
 
