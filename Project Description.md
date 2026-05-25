@@ -9,27 +9,40 @@
 
 ## Task Division
 
-<!-- Specifica qui la suddivisione dei compiti tra i membri del team o l'organizzazione modulare dell'architettura del progetto. -->
-
 - **Board and Sensors:** Acquisition, normalization and transmission of sensor's values from the board to JUCE.<br>Responsibles: Matteo and Giulio
-- **JUCE and Processing:** Selection of personalized value range for sound control and mapping of the normalized sensor's values to those ranges.<br>Transmission of those values to Supercollider<br>Responsibles: Daniel and Alessio
-- **SuperCollider:** Retrieval of the values and
+- **JUCE and Processing:** Selection of personalized value range for sound control and mapping of the normalized sensor's values to those ranges.<br>Transmission of those values to Supercollider<br>Responsibles: Lorenzo and Mattia
+- **SuperCollider:** Retrieval of the values from JUCE, creation and manipulation of actual sounds.<br>Responsibles: Daniel and Alessio
 
 ## Signals and Feedback
 
-<!-- Descrivi qui i segnali in ingresso (es. dati da sensori, controlli hardware/software) e i feedback restituiti dal sistema (es. output audio, risposte visive, attuatori). -->
-
-- **Segnali in Ingresso (Inputs):**
-- **Elaborazione/Mappatura:**
-- **Feedback in Uscita (Outputs):**
+- **Input signals (Board [norm] --> Juce):**<br>
+  - Lateral sensors: [0 ; 1]
+  - Lateral sensors: [-1 ; 1]
+  - Frontal sensor: [0 ; 1]
+  - Accellerometer: [-1 ; 1]
+  - Joystick: { 2.5, 5.0, 7.5, 10 }
+- **Mapping (JUCE --> SC):**<br>
+  Remapping of the sensor's values to the range selected by the user
+- **Feedback (SC):**
+  - Cave width: Reverb Amount
+  - Lateral wall proximity: Panning (left - right)
+  - Depth: BPM (The closer the higher)
+  - Head tilt: Pitch (Up - Down)
+  - Vertical speed: Alarm
 
 ## Networking
 
-<!-- Definisci qui l'architettura di rete, i protocolli di comunicazione utilizzati (es. OSC, MIDI, MQTT, WebSocket, UDP/TCP) e come i diversi moduli scambiano dati. -->
+- **Protocol:** OSC over UDP
+- **Network configuration:**
+  - Board Access Point with fixed IP (192.168.4.1)
+- **Data Flow:**
+  - Board --> JUCE (192.168.4.1:9111)
+  - Processing --> JUCE (127.0.0.1:9002)
+  - JUCE --> Processing (127.0.0.1:9003)
+  - JUCE --> SC (127.0.0.1:57120)
 
-- **Protocollo:** - **Configurazione di Rete:** - **Flusso dei Dati:** ## Future developments
-<!-- Elenca qui le possibili evoluzioni future del progetto, le ottimizzazioni previste, le funzionalità extra o le estensioni a lungo termine. -->
+## Future developments
 
-1.
-2.
-3.
+1. Hear a range preview before confirming
+2. Start and Stop button (to control both JUCE and SC)
+3. Alarm selection and preview
