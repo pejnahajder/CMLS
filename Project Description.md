@@ -46,3 +46,4 @@
 1. Hear a range preview before confirming
 2. Start and Stop button (to control both JUCE and SC)
 3. Alarm selection and preview
+4. Substituting the joystick with a gyroscope + accelerometer to isolate the actual vertical component of the velocity
