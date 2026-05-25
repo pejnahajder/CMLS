@@ -26,14 +26,14 @@ s.waitForBoot({
 
 
         // Convert BPM into pulses per second.
-        beatRate = bpm / 60;
+		beatRate = Lag.kr(bpm, 0.1) / 60;
 
         // Create a square-wave control signal.
-        gate = LFPulse.kr(beatRate, width: 0.5);
+        gate = LFPulse.kr(beatRate, width: 0.2);
 
         // Smooth the gate slightly to avoid clicks
         // when the beep turns on and off.
-        env = Lag.kr(gate, 0.01);
+        env = Lag.kr(gate, 0.02);
 
         // Generate the sine-wave beep,
         // then shape it with the envelope and amplitude.
