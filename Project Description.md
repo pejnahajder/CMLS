@@ -41,6 +41,20 @@
   - JUCE --> Processing (127.0.0.1:9003)
   - JUCE --> SC (127.0.0.1:57120)
 
+### OSC Tree
+
+```text
+/ (Root)
+└── sensors/
+    ├── position
+    │   ├── tilt
+    │   └── speed
+    └── space/
+        ├── pan
+        ├── width
+        └── depth
+```
+
 ## Future developments
 
 1. Hear a range preview before confirming
