@@ -2,7 +2,6 @@
 #include <WiFiNINA.h>
 #include <WiFiUdp.h>
 #include <OSCMessage.h>
-#include <OSCBundle.h>
 
 // -------------------- WiFi / OSC --------------------
 char ssid[] = "MKR_OSC_AP";
@@ -10,21 +9,23 @@ char pass[] = "password123";
 
 WiFiUDP Udp;
 
-IPAddress remoteIP(192, 168, 4, 2);  // IP del ricevitore OSC
+IPAddress remoteIP(192, 168, 4, 2);  // IP OSC Reciver
 const unsigned int localPort = 8000;
-const unsigned int remotePort = 9000;
-const unsigned long SEND_INTERVAL_MS = 100;
+const unsigned int remotePort = 9111;
+const unsigned long SEND_INTERVAL_MS = 200;
 
-// -------------------- Filtro passa-basso Gravity --------------------
-// Valori più bassi = filtro più lento/stabile.
-// Valori più alti = risposta più rapida ma più nervosa.
-const float GRAVITY_LOWPASS_ALPHA = 0.10;
+// -------------------- Low-pass filter --------------------
+const float GRAVITY_LOWPASS_ALPHA = 0.18;
+const float HCSR04_LOWPASS_ALPHA = 0.18;
+const float MMA_LOWPASS_ALPHA = 0.18;
 
 float gravity1FilteredNorm = 0.0;
 float gravity2FilteredNorm = 0.0;
-bool gravityFilterInitialized = false;
+float hcsr04FilteredNorm = 0.0;
+float mmaXFilteredNorm = 0.0;
+bool filtersInitialized = false;
 
-// -------------------- Pin sensori --------------------
+// -------------------- Sensors pin --------------------
 #define GRAVITY_1_PIN A1
 #define GRAVITY_2_PIN A2
 
@@ -37,7 +38,7 @@ bool gravityFilterInitialized = false;
 #define HCSR04_TRIG_PIN 6
 #define HCSR04_ECHO_PIN 7
 
-// -------------------- Calibrazione --------------------
+// -------------------- Normalization ranges --------------------
 #define MAX_RANGE_CM 520.0
 #define ADC_RESOLUTION 1023.0
 
@@ -79,7 +80,7 @@ float readHCSR04DistanceCm() {
 
 float clampAndNormalizeDistance(float distanceCm) {
   if (distanceCm < 0) {
-    return 1.0;
+    return 0.0;
   }
 
   if (distanceCm < MIN_DISTANCE_CM) {
@@ -127,25 +128,29 @@ float readSpeedFromJoystick() {
   return 0.0;
 }
 
-void sendSensorOSC(float pan, float width, float depth, float tilt, float speed) {
-  OSCBundle bundle;
-
-  bundle.add("/sensor/space/pan").add(pan);
-  bundle.add("/sensor/space/width").add(width);
-  bundle.add("/sensor/space/depth").add(depth);
-  bundle.add("/sensor/position/tilt").add(tilt);
-  bundle.add("/sensor/position/speed").add(speed);
+// -------------------- OSC sending --------------------
+// Sends one OSC message per sensor value.
+void sendOneOSC(const char* address, float value) {
+  OSCMessage msg(address);
+  msg.add(value);
 
   Udp.beginPacket(remoteIP, remotePort);
-  bundle.send(Udp);
+  msg.send(Udp);
   Udp.endPacket();
 
-  bundle.empty();
+  msg.empty();
+}
+
+void sendSensorOSC(float pan, float width, float depth, float tilt, float speed) {
+  sendOneOSC("/sensor/space/pan", pan);
+  sendOneOSC("/sensor/space/width", width);
+  sendOneOSC("/sensor/space/depth", depth);
+  sendOneOSC("/sensor/position/tilt", tilt);
+  sendOneOSC("/sensor/position/speed", speed);
 }
 
 void setup() {
   Serial.begin(9600);
-  while (!Serial);
 
   pinMode(HCSR04_TRIG_PIN, OUTPUT);
   pinMode(HCSR04_ECHO_PIN, INPUT);
@@ -169,7 +174,10 @@ void setup() {
 
   Udp.begin(localPort);
 
-  Serial.println("Invio OSC sensori attivo");
+  Serial.print("Invio OSC sensori attivo verso ");
+  Serial.print(remoteIP);
+  Serial.print(":");
+  Serial.println(remotePort);
 }
 
 void loop() {
@@ -187,10 +195,22 @@ void loop() {
   float gravity2 = readGravityDistanceCm(GRAVITY_2_PIN);
   float gravity2NormRaw = clampAndNormalizeDistance(gravity2);
 
-  if (!gravityFilterInitialized) {
+  delay(5);
+
+  float hcsr04 = readHCSR04DistanceCm();
+  float hcsr04NormRaw = clampAndNormalizeDistance(hcsr04);
+
+  delay(5);
+
+  int mmaX = analogRead(MMA_X_PIN);
+  float mmaXNormRaw = clampAndNormalizeAccelerometerX(mmaX);
+
+  if (!filtersInitialized) {
     gravity1FilteredNorm = gravity1NormRaw;
     gravity2FilteredNorm = gravity2NormRaw;
-    gravityFilterInitialized = true;
+    hcsr04FilteredNorm = hcsr04NormRaw;
+    mmaXFilteredNorm = mmaXNormRaw;
+    filtersInitialized = true;
   }
   else {
     gravity1FilteredNorm = lowPassFilter(
@@ -204,21 +224,24 @@ void loop() {
       gravity2NormRaw,
       GRAVITY_LOWPASS_ALPHA
     );
+
+    hcsr04FilteredNorm = lowPassFilter(
+      hcsr04FilteredNorm,
+      hcsr04NormRaw,
+      HCSR04_LOWPASS_ALPHA
+    );
+
+    mmaXFilteredNorm = lowPassFilter(
+      mmaXFilteredNorm,
+      mmaXNormRaw,
+      MMA_LOWPASS_ALPHA
+    );
   }
 
   float pan = gravity1FilteredNorm - gravity2FilteredNorm;
   float width = (gravity1FilteredNorm + gravity2FilteredNorm) / 2.0;
-
-  delay(5);
-
-  float hcsr04 = readHCSR04DistanceCm();
-  float depth = clampAndNormalizeDistance(hcsr04);  // front
-
-  delay(5);
-
-  int mmaX = analogRead(MMA_X_PIN);
-  float tilt = clampAndNormalizeAccelerometerX(mmaX);  // normX acc
-
+  float depth = hcsr04FilteredNorm;
+  float tilt = mmaXFilteredNorm;
   float speed = readSpeedFromJoystick();
 
   sendSensorOSC(pan, width, depth, tilt, speed);
@@ -238,6 +261,16 @@ void loop() {
 
   Serial.print("/sensor/space/width ");
   Serial.println(width);
+
+  Serial.print("hcsr04 raw/filtered ");
+  Serial.print(hcsr04NormRaw);
+  Serial.print(" / ");
+  Serial.println(hcsr04FilteredNorm);
+
+  Serial.print("mmaX raw/filtered ");
+  Serial.print(mmaXNormRaw);
+  Serial.print(" / ");
+  Serial.println(mmaXFilteredNorm);
 
   Serial.print("/sensor/space/depth ");
   Serial.println(depth);
